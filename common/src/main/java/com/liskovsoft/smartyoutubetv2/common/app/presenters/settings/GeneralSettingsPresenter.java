@@ -79,7 +79,6 @@ public class GeneralSettingsPresenter extends BasePresenter<Void> {
         appendContextMenuItemsCategory(settingsPresenter);
         appendHideContent(settingsPresenter);
         appendAppExitCategory(settingsPresenter);
-        appendMiniPlayerSwitch(settingsPresenter);
         appendBackgroundPlaybackCategory(settingsPresenter);
         appendScreenDimmingCategory(settingsPresenter);
         appendKeyRemappingCategory(settingsPresenter);
@@ -315,32 +314,6 @@ public class GeneralSettingsPresenter extends BasePresenter<Void> {
         }
 
         settingsPresenter.appendRadioCategory(getContext().getString(R.string.app_exit_shortcut), options);
-    }
-
-    /**
-     * Mini player: Back button shrinks the running video into a small corner window (landscape friendly)
-     * and returns to browsing. Built on top of the existing PIP + Back shortcut pair.
-     */
-    private void appendMiniPlayerSwitch(AppDialogPresenter settingsPresenter) {
-        if (!Helpers.isPictureInPictureSupported(getContext())) {
-            return;
-        }
-
-        boolean isEnabled = mPlayerData.getBackgroundMode() == PlayerData.BACKGROUND_MODE_PIP &&
-                mGeneralData.getBackgroundPlaybackShortcut() == GeneralData.BACKGROUND_PLAYBACK_SHORTCUT_BACK;
-
-        settingsPresenter.appendSingleSwitch(UiOptionItem.from(
-                getContext().getString(R.string.mini_player_title),
-                option -> {
-                    if (option.isSelected()) {
-                        mPlayerData.setBackgroundMode(PlayerData.BACKGROUND_MODE_PIP);
-                        mGeneralData.setBackgroundPlaybackShortcut(GeneralData.BACKGROUND_PLAYBACK_SHORTCUT_BACK);
-                    } else {
-                        mPlayerData.setBackgroundMode(PlayerData.BACKGROUND_MODE_DEFAULT);
-                        mGeneralData.setBackgroundPlaybackShortcut(GeneralData.BACKGROUND_PLAYBACK_SHORTCUT_HOME);
-                    }
-                },
-                isEnabled));
     }
 
     private void appendBackgroundPlaybackCategory(AppDialogPresenter settingsPresenter) {

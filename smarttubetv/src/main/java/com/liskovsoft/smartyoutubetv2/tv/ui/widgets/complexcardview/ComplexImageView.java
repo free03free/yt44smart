@@ -172,8 +172,8 @@ public class ComplexImageView extends RelativeLayout {
     }
 
     private void createAndStartPlayer() {
-        if (getVideo() == null) {
-            return;
+        if (getVideo() == null || com.liskovsoft.smartyoutubetv2.tv.ui.widgets.miniplayer.MiniPlayerManager.instance().isActive()) {
+            return; // the mini player owns the embed engine
         }
 
         if (mPreviewPlayer == null) {

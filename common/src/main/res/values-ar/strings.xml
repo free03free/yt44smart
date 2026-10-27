@@ -85,6 +85,7 @@
   <string name="large_ui">واجهة مستخدم كبيرة</string>
   <string name="video_grid_scale">مقياس شبكة الفيديو</string>
   <string name="scale_ui">مقياس واجهة المستخدم</string>
+  <string name="mini_player">مشغّل مصغّر: إبقاء الفيديو في الأعلى أثناء التصفح (عند الضغط على رجوع في المشغّل)</string>
   <string name="font_scale">حجم الخط (كل النصوص)</string>
   <string name="font_cat_card_title">عناوين الفيديوهات (البطاقات)</string>
   <string name="font_cat_card_info">معلومات الفيديو (القناة، المشاهدات، المدة)</string>
@@ -907,5 +908,4 @@
     <string name="custom_update_other_app">الملف المنزَّل تطبيق مختلف (معرّف حزمة مختلف) فلا يمكنه تحديث هذا التطبيق. ابنِ النوع نفسه المثبّت، أو نزّله بالمتصفح (الزر أدناه).</string>
     <string name="custom_update_downgrade">النسخة المنزَّلة أقدم من المثبّتة، ولا يسمح أندرويد بذلك.</string>
     <string name="custom_update_open_browser">تنزيل بالمتصفح</string>
-    <string name="mini_player_title">مشغّل مصغّر: إبقاء الفيديو في نافذة بالزاوية أثناء التصفح (زر الرجوع)</string>
 </resources>

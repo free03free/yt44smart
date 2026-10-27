@@ -92,6 +92,7 @@
     <string name="large_ui">Large UI</string>
     <string name="video_grid_scale">Video grid scale</string>
     <string name="scale_ui">UI scale</string>
+    <string name="mini_player">Mini player: keep the video on top while browsing (press Back in the player)</string>
     <string name="font_scale">Font size (all texts)</string>
     <string name="font_cat_card_title">Video titles (cards)</string>
     <string name="font_cat_card_info">Video info (channel, views, time)</string>
@@ -915,5 +916,4 @@
     <string name="custom_update_other_app">The downloaded file is a different app (different package id), so it cannot update this one. Build the same flavor as the installed app, or download it with the browser (button below).</string>
     <string name="custom_update_downgrade">The downloaded version is older than the installed one. Android does not allow that.</string>
     <string name="custom_update_open_browser">Download with browser</string>
-    <string name="mini_player_title">Mini player: keep video in a corner window while browsing (Back button)</string>
 </resources>
