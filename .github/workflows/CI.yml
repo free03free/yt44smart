@@ -1,0 +1,256 @@
+name: Build Debug APK
+
+on:
+  push:
+    branches: [ "master" ]
+  workflow_dispatch:
+    inputs:
+      flavor:
+        description: 'Product flavor, lowercase (default ststable)'
+        required: false
+        default: 'ststable'
+      app_id:
+        description: 'Force this applicationId on every flavor (blank = keep the project default)'
+        required: false
+        default: 'org.smarttube.stable'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      HAS_VT_KEY: ${{ secrets.VIRUS_TOTAL_API_KEY != '' }}
+      FLAVOR: ${{ github.event.inputs.flavor || 'ststable' }}
+      L2S_APPID: ${{ github.event.inputs.app_id || 'org.smarttube.stable' }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          submodules: recursive
+
+      - name: Fetch SharedModules and MediaServiceCore
+        run: |
+          rm -rf SharedModules MediaServiceCore
+          git clone --depth 1 --recursive https://github.com/yuliskov/SharedModules SharedModules
+          git clone --depth 1 --recursive https://github.com/yuliskov/MediaServiceCore MediaServiceCore
+          test -f SharedModules/core_settings.gradle
+          test -f MediaServiceCore/core_settings.gradle
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Update Version Name
+        id: get_version
+        run: |
+          # Keep the original code to make the nightly and original builds interchangeable
+          sed -i "s/versionName \"\(.*\)\"/versionName \"\1-nightly-${{ github.run_number }}\"/" smarttubetv/build.gradle
+          echo "VERSION_NAME=$(grep "versionName" smarttubetv/build.gradle | head -n 1 | awk -F'"' '{print $2}')" >> $GITHUB_OUTPUT
+
+      # Accepts both secret naming styles: SIGNING_KEY/KEY_STORE_PASSWORD/KEY_PASSWORD (old)
+      # and SIGNINGKEY/KEYSTOREPASSWORD/KEYPASSWORD (L2S). Fails loudly if no key is present.
+      - name: Configure Build Signing
+        env:
+          SIGN_B64: ${{ secrets.SIGNING_KEY || secrets.SIGNINGKEY }}
+          SIGN_STOREPW: ${{ secrets.KEY_STORE_PASSWORD || secrets.KEYSTOREPASSWORD }}
+          SIGN_KEYPW: ${{ secrets.KEY_PASSWORD || secrets.KEYPASSWORD }}
+          SIGN_ALIAS: ${{ secrets.ALIAS }}
+        run: |
+          if [ -z "$SIGN_B64" ]; then echo "::error::No signing key secret (SIGNING_KEY or SIGNINGKEY). Refusing to build with a random key."; exit 1; fi
+          [ -n "$SIGN_KEYPW" ] || SIGN_KEYPW="$SIGN_STOREPW"
+          echo "$SIGN_B64" | base64 --decode > "${{ github.workspace }}/key.jks"
+          {
+            echo "storePassword=$SIGN_STOREPW"
+            echo "keyAlias=$SIGN_ALIAS"
+            echo "keyPassword=$SIGN_KEYPW"
+            echo "storeFile=${{ github.workspace }}/key.jks"
+          } > keystore.properties
+          keytool -list -v -keystore key.jks -alias "$SIGN_ALIAS" -storepass "$SIGN_STOREPW" > ks.txt \
+            || { echo "::error::Cannot open keystore: wrong ALIAS or store password"; exit 1; }
+          EXP=$(grep -m1 'SHA256:' ks.txt | sed 's/.*SHA256: *//' | tr -d ':' | tr 'A-F' 'a-f')
+          rm -f ks.txt
+          echo "EXPECTED_SHA256=$EXP" >> "$GITHUB_ENV"
+          echo "Expected signer SHA-256: $EXP"
+
+      # Root fix for "update not accepted":
+      #  - same applicationId on EVERY flavor (Android only updates the same package id)
+      #  - same signing key (handled above and re-verified after the build)
+      #  - versionCode untouched (equal is accepted; raising it would block builds made elsewhere, e.g. in L2S)
+      - name: Pin applicationId
+        run: |
+          CAP="$(echo "${FLAVOR:0:1}" | tr a-z A-Z)${FLAVOR:1}"
+          echo "FLAVOR_CAP=$CAP" >> "$GITHUB_ENV"
+          echo "APK_DIR=./smarttubetv/build/outputs/apk/$FLAVOR/release" >> "$GITHUB_ENV"
+          mkdir -p "$HOME/.gradle/init.d"
+          cat > "$HOME/.gradle/init.d/l2s-appid.gradle" <<'GRADLE'
+          allprojects { p ->
+            p.afterEvaluate {
+              def id = System.getenv('L2S_APPID')
+              try {
+                def ext = p.extensions.findByName('android')
+                if (ext == null || !p.plugins.hasPlugin('com.android.application')) return
+                if (id) {
+                  ext.defaultConfig.applicationId = id
+                  try { ext.defaultConfig.applicationIdSuffix = null } catch (Throwable t) { }
+                  ext.productFlavors.each { f ->
+                    f.applicationId = id
+                    try { f.applicationIdSuffix = null } catch (Throwable t) { }
+                  }
+                  ext.buildTypes.each { b -> try { b.applicationIdSuffix = null } catch (Throwable t) { } }
+                }
+              } catch (Throwable t) { println 'L2S appid: ' + t }
+            }
+          }
+          GRADLE
+          echo "flavor=$FLAVOR task=assemble${CAP}Release appId=${L2S_APPID:-default}"
+
+      - name: Grant Gradle permissions
+        run: chmod +x gradlew
+
+      - name: Lint with Gradle
+        run: ./gradlew lint${FLAVOR_CAP}Release
+
+      - name: Upload Lint Report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: lint-report
+          path: '**/build/reports/lint-results-*.html'
+          if-no-files-found: warn
+
+      - name: Build with Gradle
+        run: |
+          ./gradlew clean assemble${FLAVOR_CAP}Release
+          if ! ls "$APK_DIR"/*.apk > /dev/null 2>&1; then
+            echo "::error::No APK in $APK_DIR. Existing outputs:"; find smarttubetv/build/outputs/apk -name '*.apk' || true; exit 1
+          fi
+
+      # Guarantees the key is applied no matter what the Gradle config does, then proves it.
+      - name: Re-sign APKs and verify signature
+        env:
+          SIGN_STOREPW: ${{ secrets.KEY_STORE_PASSWORD || secrets.KEYSTOREPASSWORD }}
+          SIGN_KEYPW: ${{ secrets.KEY_PASSWORD || secrets.KEYPASSWORD }}
+          SIGN_ALIAS: ${{ secrets.ALIAS }}
+        run: |
+          set -e
+          [ -n "$SIGN_KEYPW" ] || SIGN_KEYPW="$SIGN_STOREPW"
+          export SIGN_KEYPW
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          echo "build-tools: $BT"
+          ls "$APK_DIR"/*.apk > /dev/null || { echo "::error::No APK found in $APK_DIR"; exit 1; }
+          echo "### Signature check" >> "$GITHUB_STEP_SUMMARY"
+          echo "| APK | package | versionCode | signer SHA-256 |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| :--- | :--- | :--- | :--- |" >> "$GITHUB_STEP_SUMMARY"
+          for f in "$APK_DIR"/*.apk; do
+            "$BT/zipalign" -p -f 4 "$f" "$RUNNER_TEMP/aligned.apk"
+            "$BT/apksigner" sign --ks "${{ github.workspace }}/key.jks" --ks-key-alias "$SIGN_ALIAS" \
+              --ks-pass env:SIGN_STOREPW --key-pass env:SIGN_KEYPW \
+              --out "$RUNNER_TEMP/signed.apk" "$RUNNER_TEMP/aligned.apk"
+            "$BT/apksigner" verify --print-certs "$RUNNER_TEMP/signed.apk" > "$RUNNER_TEMP/v.txt" \
+              || { cat "$RUNNER_TEMP/v.txt"; echo "::error::Signature verify failed for $f"; exit 1; }
+            GOT=$(grep -m1 'certificate SHA-256 digest' "$RUNNER_TEMP/v.txt" | sed 's/.*digest: *//' | tr -d ':' | tr 'A-F' 'a-f')
+            if [ "$GOT" != "$EXPECTED_SHA256" ]; then echo "::error::Signer mismatch in $f: got $GOT expected $EXPECTED_SHA256"; exit 1; fi
+            INFO=$("$BT/aapt2" dump badging "$RUNNER_TEMP/signed.apk" 2>/dev/null | sed -n "s/^package: name='\([^']*\)' versionCode='\([^']*\)'.*/\1 \2/p" | head -1)
+            if [ -n "$L2S_APPID" ] && [ "${INFO% *}" != "$L2S_APPID" ]; then echo "::error::Package is '${INFO% *}', expected '$L2S_APPID'. applicationId override did not apply."; exit 1; fi
+            mv -f "$RUNNER_TEMP/signed.apk" "$f"
+            echo "OK $(basename "$f") | signer=$GOT | $INFO"
+            echo "| $(basename "$f") | ${INFO% *} | ${INFO#* } | \`${GOT:0:16}…\` |" >> "$GITHUB_STEP_SUMMARY"
+          done
+          rm -f "$RUNNER_TEMP/aligned.apk"
+
+      - name: VirusTotal Scan
+        if: ${{ env.HAS_VT_KEY == 'true' }}
+        id: vt
+        uses: crazy-max/ghaction-virustotal@936d8c5c00afe97d3d9a1af26d017cfdf26800a2 # v5.0.0
+        with:
+          vt_api_key: ${{ secrets.VIRUS_TOTAL_API_KEY }}
+          files: |
+            ./smarttubetv/build/outputs/apk/${{ env.FLAVOR }}/release/*.apk
+          request_rate: 4
+
+      - name: VirusTotal Summary
+        if: steps.vt.outcome == 'success'
+        run: |
+          echo "Waiting 150s for VirusTotal engines to report..."
+          sleep 150
+
+          echo "### Security Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "| Artifact Name | VirusTotal Status | Detailed Report |" >> $GITHUB_STEP_SUMMARY
+          echo "| :--- | :--- | :--- |" >> $GITHUB_STEP_SUMMARY
+
+          for apk in ./smarttubetv/build/outputs/apk/${{ env.FLAVOR }}/release/*.apk; do
+            filename=$(basename "$apk")
+            sha256=$(sha256sum "$apk" | awk '{print $1}')
+
+            # Construct the dynamic badge URL using the hash
+            badge_url="https://badges.cssnr.com/vt/id/$sha256?start=green&end=red&n=8"
+            vt_link="https://www.virustotal.com/gui/file/$sha256"
+
+            echo "| $filename | [![$filename]($badge_url)]($vt_link) | [View Report]($vt_link) |" >> $GITHUB_STEP_SUMMARY
+          done
+
+      - name: Upload ARM64 APK
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: SmartTube_${{ steps.get_version.outputs.VERSION_NAME }}_arm64
+          path: ./smarttubetv/build/outputs/apk/${{ env.FLAVOR }}/release/*_arm64-v8a.apk
+          if-no-files-found: warn
+
+      - name: Upload ARMv7 APK
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: SmartTube_${{ steps.get_version.outputs.VERSION_NAME }}_armeabi-v7a
+          path: ./smarttubetv/build/outputs/apk/${{ env.FLAVOR }}/release/*_armeabi-v7a.apk
+          if-no-files-found: warn
+
+      - name: Upload Universal APK
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: SmartTube_${{ steps.get_version.outputs.VERSION_NAME }}_universal
+          path: ./smarttubetv/build/outputs/apk/${{ env.FLAVOR }}/release/*_universal.apk
+          if-no-files-found: warn
+
+      - name: Upload x86 APK
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: SmartTube_${{ steps.get_version.outputs.VERSION_NAME }}_x86
+          path: ./smarttubetv/build/outputs/apk/${{ env.FLAVOR }}/release/*_x86.apk
+          if-no-files-found: warn
+
+      - name: Publish GitHub Release (used by the in-app "update from my modifications site")
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="nightly-${{ github.run_number }}"
+          APK_DIR=./smarttubetv/build/outputs/apk/$FLAVOR/release
+          UNI=$(ls $APK_DIR/*_universal.apk 2>/dev/null | head -n 1)
+          [ -n "$UNI" ] || UNI=$(ls $APK_DIR/*.apk | head -n 1)
+          APK_NAME=$(basename "$UNI")
+          BASE="https://github.com/${{ github.repository }}/releases/download/$TAG"
+          APKS='{}'
+          for f in $APK_DIR/*.apk; do
+            n=$(basename "$f")
+            abi=$(echo "$n" | sed -nE 's/.*_(arm64-v8a|armeabi-v7a|x86_64|x86|universal)\.apk$/\1/p')
+            [ -n "$abi" ] || continue
+            APKS=$(echo "$APKS" | jq --arg k "$abi" --arg v "$BASE/$n" '. + {($k): $v}')
+          done
+          jq -n \
+            --arg version "${{ steps.get_version.outputs.VERSION_NAME }}" \
+            --arg change "$(git log -1 --pretty=%s)" \
+            --arg apk "$BASE/$APK_NAME" \
+            --arg flavor "$FLAVOR" \
+            --arg appId "$L2S_APPID" \
+            --argjson apks "$APKS" \
+            '{version: $version, changes: [$change], apk: $apk, flavor: $flavor, appId: $appId, apks: $apks}' > update.json
+          cat update.json
+          gh release create "$TAG" $APK_DIR/*.apk update.json \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "${{ steps.get_version.outputs.VERSION_NAME }}" \
+            --notes "$(git log -1 --pretty=%B)" \
+            --latest

@@ -1,0 +1,272 @@
+name: L2S Signed Build
+on:
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: 'debug or release'
+        required: false
+        default: 'debug'
+      flavor:
+        description: 'product flavor task part, e.g. Stable (optional)'
+        required: false
+        default: ''
+      abi:
+        description: 'abi or universal (optional)'
+        required: false
+        default: ''
+      publish:
+        description: 'publish a GitHub Release (nightly-N) so in-app updaters see it'
+        required: false
+        default: 'true'
+      force:
+        description: 'bypass package/signer/versionCode guard (use only if you changed them on purpose)'
+        required: false
+        default: 'false'
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch git submodules
+        run: |
+          fetch() {
+            [ -f "$1/.gitmodules" ] || return 0
+            git config -f "$1/.gitmodules" --get-regexp '^submodule\..*\.path$' | while read -r key sub; do
+              name="${key#submodule.}"; name="${name%.path}"
+              url=$(git config -f "$1/.gitmodules" --get "submodule.$name.url")
+              dir="$1/$sub"
+              case "$url" in http*) ;; *) continue ;; esac
+              if [ ! -d "$dir" ] || [ -z "$(ls -A "$dir" 2>/dev/null)" ]; then
+                echo "Cloning $name from $url"
+                rm -rf "$dir"
+                if git clone --depth 1 "$url" "$dir"; then rm -rf "$dir/.git"; else echo "WARNING: could not clone $url"; fi
+              fi
+              fetch "$dir"
+            done
+          }
+          fetch .
+      - name: Detect Gradle version
+        id: gv
+        run: |
+          V=8.11.1
+          F=gradle/wrapper/gradle-wrapper.properties
+          if [ -f "$F" ]; then X=$(sed -n 's/.*gradle-\([0-9][0-9.]*\)-\(bin\|all\)\.zip.*/\1/p' "$F" | head -1); if [ -n "$X" ]; then V="$X"; fi; fi
+          echo "Using Gradle $V"
+          echo "v=$V" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ steps.gv.outputs.v }}
+          validate-wrappers: false
+      - name: Prepare signing
+        env:
+          L2S_B64: ${{ secrets.SIGNINGKEY || secrets.SIGNING_KEY }}
+          L2S_ALIAS: ${{ secrets.ALIAS }}
+          L2S_STOREPW: ${{ secrets.KEYSTOREPASSWORD || secrets.KEY_STORE_PASSWORD }}
+          L2S_KEYPW: ${{ secrets.KEYPASSWORD || secrets.KEY_PASSWORD }}
+        run: |
+          if [ -z "$L2S_B64" ]; then echo "::error::No signing key secret (SIGNINGKEY or SIGNING_KEY). Upload a key from L2S first."; exit 1; fi
+          echo "$L2S_B64" | base64 -d > "$RUNNER_TEMP/l2s.keystore"
+          [ -n "$L2S_KEYPW" ] || L2S_KEYPW="$L2S_STOREPW"
+          echo "L2S_STORE=$RUNNER_TEMP/l2s.keystore" >> "$GITHUB_ENV"
+          echo "L2S_ALIAS=$L2S_ALIAS" >> "$GITHUB_ENV"
+          echo "L2S_KEYPW=$L2S_KEYPW" >> "$GITHUB_ENV"
+          keytool -list -v -keystore "$RUNNER_TEMP/l2s.keystore" -alias "$L2S_ALIAS" -storepass "$L2S_STOREPW" > "$RUNNER_TEMP/ks.txt" || { echo "::error::Cannot open keystore: wrong ALIAS or KEYSTOREPASSWORD"; exit 1; }
+          EXP=$(grep -m1 'SHA256:' "$RUNNER_TEMP/ks.txt" | sed 's/.*SHA256: *//' | tr -d ':' | tr 'A-F' 'a-f')
+          echo "L2S_EXPECTED=$EXP" >> "$GITHUB_ENV"
+          echo "Expected signer SHA-256: $EXP"
+          mkdir -p "$HOME/.gradle/init.d"
+          cat > "$HOME/.gradle/init.d/l2s-sign.gradle" <<'GRADLE'
+          allprojects { p ->
+            p.plugins.withId('com.android.application') {
+              def e = System.getenv()
+              if (e['L2S_STORE']) {
+                def ext = p.extensions.findByName('android')
+                if (ext != null) {
+                  def sc = ext.signingConfigs.maybeCreate('l2sSign')
+                  sc.storeFile = new File(e['L2S_STORE'])
+                  sc.storePassword = e['L2S_STOREPW']
+                  sc.keyAlias = e['L2S_ALIAS']
+                  sc.keyPassword = e['L2S_KEYPW']
+                  p.afterEvaluate {
+                    ext.buildTypes.each { bt ->
+                      if (bt.name == 'debug' || bt.name == 'release') bt.signingConfig = sc
+                    }
+                  }
+                }
+              }
+            }
+          }
+          GRADLE
+      - name: Release number and versionName
+        if: ${{ github.event.inputs.publish != 'false' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          MAXN=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '[.[].tag_name | select(test("^nightly-[0-9]+$")) | sub("nightly-";"") | tonumber] | max // 0' 2>/dev/null || echo 0)
+          N=$((MAXN + 1))
+          echo "L2S_N=$N" >> "$GITHUB_ENV"
+          # append -nightly-N to a literal versionName so in-app updaters can compare builds
+          CNT=0
+          while IFS= read -r f; do
+            if grep -q 'com.android.application' "$f" && grep -Eq 'versionName[ =]+"[^"$]*"' "$f" && ! grep -Eq 'versionName[ =]+"[^"]*-nightly-[0-9]+"' "$f"; then
+              sed -i -E "s/(versionName[ =]+\"[^\"$]*)\"/\1-nightly-$N\"/" "$f"; CNT=$((CNT+1)); echo "versionName suffix added in $f"
+            fi
+          done < <(find . -name 'build.gradle' -o -name 'build.gradle.kts' | grep -v '/build/')
+          [ "$CNT" -gt 0 ] || echo "::warning::No literal versionName found; updater version comparison may not work"
+      - name: Build APK
+        env:
+          L2S_STOREPW: ${{ secrets.KEYSTOREPASSWORD || secrets.KEY_STORE_PASSWORD }}
+          L2S_VARIANT: ${{ github.event.inputs.variant }}
+          L2S_FLAVOR: ${{ github.event.inputs.flavor }}
+          L2S_ABI: ${{ github.event.inputs.abi }}
+        run: |
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          TASK=assembleDebug
+          if [ "$L2S_VARIANT" = "release" ]; then TASK=assembleRelease; fi
+          case "$L2S_FLAVOR$L2S_ABI" in *[!A-Za-z0-9_.-]*) echo "Invalid flavor/abi input"; exit 1;; esac
+          if [ -n "$L2S_FLAVOR" ]; then TASK="assemble${L2S_FLAVOR}${TASK#assemble}"; fi
+          echo "Gradle task: $TASK  abi: ${L2S_ABI:-all}"
+          mkdir -p "$HOME/.gradle/init.d"
+          cat > "$HOME/.gradle/init.d/l2s-abi.gradle" <<'GRADLE'
+          allprojects { p ->
+            p.afterEvaluate {
+              def abi = System.getenv('L2S_ABI')
+              if (!abi) return
+              try {
+                def ext = p.extensions.findByName('android')
+                if (ext == null || !p.plugins.hasPlugin('com.android.application')) return
+                if (abi == 'universal') {
+                  ext.splits.abi.enable = false
+                } else {
+                  try { ext.defaultConfig.ndk.abiFilters.clear() } catch (Throwable t1) { }
+                  try { ext.productFlavors.each { f -> try { f.ndk.abiFilters.clear() } catch (Throwable t2) { } } } catch (Throwable t3) { }
+                  ext.splits.abi.enable = true
+                  ext.splits.abi.reset()
+                  ext.splits.abi.include(abi)
+                  ext.splits.abi.universalApk = false
+                }
+              } catch (Throwable t) { println 'L2S abi: ' + t }
+            }
+          }
+          GRADLE
+          rm -f gradle/wrapper/gradle-wrapper.jar
+          # Attempt 1: with the ABI/signing helpers. Attempts 2-3 drop them (the later re-sign step
+          # guarantees the key anyway, and the wanted ABI is picked from the produced APKs).
+          if ! gradle --no-daemon $TASK; then
+            echo "::warning::Build failed with L2S init scripts; retrying without the ABI script"
+            rm -f "$HOME/.gradle/init.d/l2s-abi.gradle"
+            if ! gradle --no-daemon --stacktrace $TASK; then
+              echo "::warning::Build failed again; retrying with no L2S init scripts at all (plain project build)"
+              rm -f "$HOME/.gradle/init.d/l2s-sign.gradle"
+              gradle --no-daemon --stacktrace $TASK
+            fi
+          fi
+      - name: Re-sign and verify (guarantees the key is applied)
+        env:
+          L2S_STOREPW: ${{ secrets.KEYSTOREPASSWORD || secrets.KEY_STORE_PASSWORD }}
+          L2S_ABI: ${{ github.event.inputs.abi }}
+        run: |
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          echo "build-tools: $BT"
+          mkdir -p l2s-out
+          find . -path ./l2s-out -prune -o -path '*/build/outputs/apk/*' -name '*.apk' -print > "$RUNNER_TEMP/apkall.txt"
+          # keep only the requested ABI when the build produced several (fallback builds do)
+          WANTABI="$L2S_ABI"
+          if [ -n "$WANTABI" ] && grep -q "_${WANTABI}\.apk$" "$RUNNER_TEMP/apkall.txt"; then
+            grep "_${WANTABI}\.apk$" "$RUNNER_TEMP/apkall.txt" > "$RUNNER_TEMP/apklist.txt"
+          else
+            cp "$RUNNER_TEMP/apkall.txt" "$RUNNER_TEMP/apklist.txt"
+          fi
+          FOUND=0
+          while IFS= read -r f; do
+            FOUND=1
+            b=$(basename "$f" .apk); b="${b%-unsigned}"
+            "$BT/zipalign" -p -f 4 "$f" "$RUNNER_TEMP/aligned.apk"
+            "$BT/apksigner" sign --ks "$L2S_STORE" --ks-key-alias "$L2S_ALIAS" --ks-pass env:L2S_STOREPW --key-pass env:L2S_KEYPW --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true --out "l2s-out/$b.apk" "$RUNNER_TEMP/aligned.apk"
+            "$BT/apksigner" verify --verbose --print-certs "l2s-out/$b.apk" > "$RUNNER_TEMP/v.txt" || { cat "$RUNNER_TEMP/v.txt"; echo "::error::Signature verify failed for $b"; exit 1; }
+            GOT=$(grep -m1 'certificate SHA-256 digest' "$RUNNER_TEMP/v.txt" | sed 's/.*digest: *//' | tr -d ':' | tr 'A-F' 'a-f')
+            if [ "$GOT" != "$L2S_EXPECTED" ]; then echo "::error::Signer mismatch in $b: got $GOT expected $L2S_EXPECTED"; exit 1; fi
+            INFO=$("$BT/aapt2" dump badging "l2s-out/$b.apk" 2>/dev/null | sed -n "s/^package: name='\([^']*\)' versionCode='\([^']*\)' versionName='\([^']*\)'.*/\1 versionCode=\2 versionName=\3/p" | head -1)
+            echo "OK $b.apk | signer=$GOT | $INFO"
+          done < <(sed -n 'p' "$RUNNER_TEMP/apklist.txt")
+          if [ "$FOUND" = 0 ]; then echo "::error::No APK found"; exit 1; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-apk
+          path: l2s-out/*.apk
+      - name: Guard and publish release
+        if: ${{ github.event.inputs.publish != 'false' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          L2S_FORCE: ${{ github.event.inputs.force }}
+        run: |
+          set -e
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
+          # last L2S release marker (package, signer, versionCode) from earlier runs
+          PREV=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '[.[] | select((.body // "") | contains("l2s-pkg:"))][0].body // ""' 2>/dev/null || true)
+          PPKG=$(printf '%s\n' "$PREV" | sed -n 's/^l2s-pkg: *//p' | head -1)
+          PSIG=$(printf '%s\n' "$PREV" | sed -n 's/^l2s-signer: *//p' | head -1)
+          PVC=$(printf '%s\n' "$PREV" | sed -n 's/^l2s-versioncode: *//p' | head -1)
+          # all packages that were built
+          : > "$RUNNER_TEMP/pk.txt"
+          for f in l2s-out/*.apk; do
+            P=$("$BT/aapt2" dump badging "$f" 2>/dev/null | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -1)
+            echo "$P $f" >> "$RUNNER_TEMP/pk.txt"
+          done
+          NPK=$(cut -d' ' -f1 "$RUNNER_TEMP/pk.txt" | sort -u | wc -l)
+          if [ -n "$PPKG" ]; then
+            WANT="$PPKG"
+            if ! grep -q "^$WANT " "$RUNNER_TEMP/pk.txt"; then
+              if [ "$L2S_FORCE" = "true" ]; then WANT=$(head -1 "$RUNNER_TEMP/pk.txt" | cut -d' ' -f1)
+              else echo "::error::Package guard: previous releases are $PPKG but this build produced: $(cut -d' ' -f1 "$RUNNER_TEMP/pk.txt" | sort -u | tr '\n' ' '). Wrong flavor? Pick the flavor of $PPKG (or run with force=true)."; exit 1; fi
+            fi
+          elif [ "$NPK" -gt 1 ]; then
+            echo "::warning::Several packages were built and no earlier release defines which one to publish. Release skipped; the artifact is still available. Choose one flavor once and it will be remembered."; exit 0
+          else
+            WANT=$(head -1 "$RUNNER_TEMP/pk.txt" | cut -d' ' -f1)
+          fi
+          # keep only APKs of the wanted package
+          mkdir -p l2s-rel
+          VC=""; VN=""
+          while read -r P F; do
+            [ "$P" = "$WANT" ] || continue
+            I=$("$BT/aapt2" dump badging "$F" 2>/dev/null | sed -n "s/^package: name='[^']*' versionCode='\([^']*\)' versionName='\([^']*\)'.*/\1 \2/p" | head -1)
+            VC="${I%% *}"; VN="${I#* }"
+            cp "$F" "l2s-rel/$(basename "$F")"
+          done < "$RUNNER_TEMP/pk.txt"
+          ls l2s-rel/*.apk >/dev/null 2>&1 || { echo "::error::Nothing to publish"; exit 1; }
+          if [ "$L2S_FORCE" != "true" ]; then
+            if [ -n "$PSIG" ] && [ "$PSIG" != "$L2S_EXPECTED" ]; then echo "::error::Signer guard: previous release was signed with $PSIG, this key is $L2S_EXPECTED. Phones with the old build will reject this update. Use the original key (or force=true)."; exit 1; fi
+            if [ -n "$PVC" ] && [ -n "$VC" ] && [ "$VC" -lt "$PVC" ] 2>/dev/null; then echo "::error::versionCode guard: this build is $VC but the previous release was $PVC. Android refuses downgrades. Raise versionCode (or force=true)."; exit 1; fi
+          fi
+          TAG="nightly-${L2S_N:-$(( $(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '[.[].tag_name | select(test("^nightly-[0-9]+$")) | sub("nightly-";"") | tonumber] | max // 0') + 1 ))}"
+          BASEURL="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG"
+          APKS='{}'; UNI=""
+          for f in l2s-rel/*.apk; do
+            n=$(basename "$f")
+            abi=$(echo "$n" | sed -nE 's/.*_(arm64-v8a|armeabi-v7a|x86_64|x86|universal)\.apk$/\1/p')
+            [ -n "$abi" ] || abi=universal
+            APKS=$(echo "$APKS" | jq --arg k "$abi" --arg v "$BASEURL/$n" '. + {($k): $v}')
+            if [ "$abi" = universal ] || [ -z "$UNI" ]; then UNI="$n"; fi
+          done
+          jq -n --arg version "$VN" --arg change "$(git log -1 --pretty=%s)" --arg apk "$BASEURL/$UNI" --arg appId "$WANT" --argjson apks "$APKS" \
+            '{version: $version, changes: [$change], apk: $apk, appId: $appId, apks: $apks}' > l2s-rel/update.json
+          cat l2s-rel/update.json
+          {
+            echo "Built by L2S Signed Build from $GITHUB_SHA"
+            echo
+            echo "l2s-pkg: $WANT"
+            echo "l2s-signer: $L2S_EXPECTED"
+            echo "l2s-versioncode: $VC"
+            echo "l2s-versionname: $VN"
+          } > "$RUNNER_TEMP/notes.md"
+          gh release create "$TAG" l2s-rel/*.apk l2s-rel/update.json --title "$VN" --notes-file "$RUNNER_TEMP/notes.md" --target "$GITHUB_SHA" --latest
+          echo "Published $TAG for $WANT (versionCode $VC, $VN)"
