@@ -523,12 +523,26 @@ public class Utils {
     }
 
     public static void openLinkExt(Context context, String url) {
+        if (context == null || url == null || url.trim().isEmpty()) {
+            return;
+        }
+
+        // Open account activation in a real external browser. Embedded WebViews
+        // can stall or fail during Google/YouTube authentication.
         try {
-            openLinkInTabs(context, url);
-        } catch (Exception e) {
-            // Permission Denial on Android 9 (SecurityException)
-            // Chrome Tabs not found (ActivityNotFoundException)
-            Helpers.openLink(context, url); // revert to simple in-browser page
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            intent.addCategory(Intent.CATEGORY_BROWSABLE);
+            if (!(context instanceof android.app.Activity)) {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            }
+            context.startActivity(intent);
+        } catch (ActivityNotFoundException | SecurityException e) {
+            // Last-resort fallback on devices without an external browser.
+            try {
+                WebBrowserPresenter.instance(context).loadUrl(url);
+            } catch (Exception ignored) {
+                Log.e("Utils", "Unable to open sign-in URL: %s", e.getMessage());
+            }
         }
     }
 
