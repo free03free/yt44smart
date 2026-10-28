@@ -7,6 +7,8 @@ import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
+import android.view.ViewParent;
+import android.view.ViewTreeObserver;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.TextView;
@@ -53,6 +55,14 @@ public final class MiniPlayerManager {
     private static boolean sLongPressHandled;
     private static int sPosition = MiniPlayerData.POSITION_BOTTOM_RIGHT;
     private static WeakReference<View> sPrevFocus;
+    private static WeakReference<View> sPendingFocus;
+    private static ViewGroup sFocusRoot;
+    private static boolean sFocusChanged;
+    // The app moves the focus (and scrolls) with a delay. Wait before deciding that the edge has been reached.
+    private static final long EDGE_CHECK_DELAY_MS = 350;
+    private static final Runnable sJumpRunnable = MiniPlayerManager::jumpToWindowIfEdge;
+    private static final ViewTreeObserver.OnGlobalFocusChangeListener sFocusListener =
+            (oldFocus, newFocus) -> sFocusChanged = true;
     private static Activity sPendingHost;
     private static final Runnable sStartRunnable = MiniPlayerManager::startPending;
 
@@ -150,24 +160,28 @@ public final class MiniPlayerManager {
 
     /**
      * Called after the activity has dispatched the key. When the user pressed the arrow towards the window's corner
-     * and nothing else could take the focus (edge of the screen), the focus moves to the mini window.
+     * and nothing else takes the focus (the edge of the content), the focus moves to the mini window.
      */
     public static void onKeyDispatched(Activity activity, KeyEvent event, View focusBefore) {
         if (sContainer == null || sHost != activity || activity instanceof PlaybackActivity ||
-                event.getAction() != KeyEvent.ACTION_DOWN || event.getRepeatCount() != 0 || focusBefore == null) {
+                event.getAction() != KeyEvent.ACTION_DOWN) {
             return;
         }
+
+        // Any new key press cancels the pending check
+        Utils.removeCallbacks(sJumpRunnable);
+        sPendingFocus = null;
 
         int keyCode = event.getKeyCode();
         boolean isVertical = keyCode == (isBottom() ? KeyEvent.KEYCODE_DPAD_DOWN : KeyEvent.KEYCODE_DPAD_UP);
         boolean isSide = keyCode == (isRight() ? KeyEvent.KEYCODE_DPAD_RIGHT : KeyEvent.KEYCODE_DPAD_LEFT);
 
-        if (!isVertical && !isSide) {
+        if ((!isVertical && !isSide) || event.getRepeatCount() != 0 || focusBefore == null || sContainer.hasFocus()) {
             return;
         }
 
-        // The focus has been moved by the app itself. Not the edge
-        if (sContainer.hasFocus() || activity.getCurrentFocus() != focusBefore) {
+        // There is more content in that direction. Not the edge
+        if (canContentScroll(focusBefore, keyCode)) {
             return;
         }
 
@@ -176,8 +190,44 @@ public final class MiniPlayerManager {
             return;
         }
 
+        sFocusChanged = false;
+        sPendingFocus = new WeakReference<>(focusBefore);
+        Utils.postDelayed(sJumpRunnable, EDGE_CHECK_DELAY_MS);
+    }
+
+    private static void jumpToWindowIfEdge() {
+        View focusBefore = sPendingFocus != null ? sPendingFocus.get() : null;
+        sPendingFocus = null;
+
+        if (focusBefore == null || sContainer == null || sHost == null || sContainer.hasFocus()) {
+            return;
+        }
+
+        // The app has moved the focus meanwhile (maybe with a delay). Not the edge
+        if (sFocusChanged || sHost.getCurrentFocus() != focusBefore) {
+            return;
+        }
+
         sPrevFocus = new WeakReference<>(focusBefore);
         sContainer.requestFocus();
+    }
+
+    private static boolean canContentScroll(View view, int keyCode) {
+        boolean vertical = keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_DOWN;
+        int direction = (keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_LEFT) ? -1 : 1;
+
+        View current = view;
+
+        while (current != null) {
+            if (vertical ? current.canScrollVertically(direction) : current.canScrollHorizontally(direction)) {
+                return true;
+            }
+
+            ViewParent parent = current.getParent();
+            current = parent instanceof View ? (View) parent : null;
+        }
+
+        return false;
     }
 
     private static boolean handleFocusedKey(KeyEvent event) {
@@ -331,6 +381,9 @@ public final class MiniPlayerManager {
         sPlayerView = playerView;
         sPosition = data.getPosition();
         sPrevFocus = null;
+        sPendingFocus = null;
+        sFocusRoot = root;
+        root.getViewTreeObserver().addOnGlobalFocusChangeListener(sFocusListener);
 
         Video video = Video.from(sVideo);
         video.pendingPosMs = sPositionMs;
@@ -375,6 +428,17 @@ public final class MiniPlayerManager {
     }
 
     private static void destroyView() {
+        Utils.removeCallbacks(sJumpRunnable);
+        sPendingFocus = null;
+
+        if (sFocusRoot != null) {
+            ViewTreeObserver observer = sFocusRoot.getViewTreeObserver();
+            if (observer.isAlive()) {
+                observer.removeOnGlobalFocusChangeListener(sFocusListener);
+            }
+            sFocusRoot = null;
+        }
+
         if (sContainer != null) {
             ViewGroup parent = (ViewGroup) sContainer.getParent();
             if (parent != null) {
