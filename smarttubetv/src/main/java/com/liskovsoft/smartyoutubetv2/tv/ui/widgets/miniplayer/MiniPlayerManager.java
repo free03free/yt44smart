@@ -19,6 +19,7 @@ import java.lang.ref.WeakReference;
 
 import com.liskovsoft.sharedutils.mylogger.Log;
 import com.liskovsoft.smartyoutubetv2.common.app.models.data.Video;
+import com.liskovsoft.smartyoutubetv2.common.app.presenters.AppDialogPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.PlaybackPresenter;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.selector.ExoFormatItem;
 import com.liskovsoft.smartyoutubetv2.common.prefs.MiniPlayerData;
@@ -32,6 +33,7 @@ import com.liskovsoft.smartyoutubetv2.tv.ui.widgets.embedplayer.EmbedPlayerView;
  * <br>
  * The fullscreen player hands over the current video (and position) when the user presses Back.
  * The window is recreated on every browse activity so it keeps playing while the user navigates.
+ * It is closed for good when the user leaves the app (Home, exit, screen off).
  * <br>
  * Remote control while the window is visible:
  * <ul>
@@ -117,7 +119,13 @@ public final class MiniPlayerManager {
         }
 
         if (sHost == activity) {
-            savePositionAndDestroyView();
+            if (activity.isChangingConfigurations() || AppDialogPresenter.instance(activity).isDialogShown()) {
+                // Temporary stop (rotation, opaque dialog on top): the window comes back on resume
+                savePositionAndDestroyView();
+            } else {
+                // The user has left the app (Home, screen off, etc.): close the window for good
+                dismiss();
+            }
         }
     }
 
