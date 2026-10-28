@@ -2,240 +2,333 @@ package com.liskovsoft.smartyoutubetv2.tv.ui.widgets.miniplayer;
 
 import android.app.Activity;
 import android.graphics.Color;
-import android.util.DisplayMetrics;
-import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 
+import com.liskovsoft.sharedutils.mylogger.Log;
 import com.liskovsoft.smartyoutubetv2.common.app.models.data.Video;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.PlaybackPresenter;
-import com.liskovsoft.smartyoutubetv2.common.app.views.PlaybackView;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.selector.ExoFormatItem;
+import com.liskovsoft.smartyoutubetv2.common.prefs.MiniPlayerData;
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
+import com.liskovsoft.smartyoutubetv2.common.R;
 import com.liskovsoft.smartyoutubetv2.tv.ui.playback.PlaybackActivity;
 import com.liskovsoft.smartyoutubetv2.tv.ui.widgets.embedplayer.EmbedPlayerView;
 
 /**
- * In-app mini player: the video keeps playing in a small bar at the top of every browse screen
- * while the rest of the screen is used to browse other videos.
- * <p>
- * Built on top of {@link EmbedPlayerView} (the same engine the card previews use).
+ * In-app mini player: a small floating video window placed in a corner of the browse screens.
+ * <br>
+ * The fullscreen player hands over the current video (and position) when the user presses Back.
+ * The window is recreated on every browse activity so it keeps playing while the user navigates.
+ * <br>
+ * Remote control while the window is visible:
+ * <ul>
+ *     <li>Play/Pause - pause or resume</li>
+ *     <li>Long press Play/Pause - expand to fullscreen</li>
+ *     <li>Stop - close the window</li>
+ * </ul>
  */
 public final class MiniPlayerManager {
-    private static MiniPlayerManager sInstance;
+    private static final String TAG = MiniPlayerManager.class.getSimpleName();
+    // Wait until the fullscreen activity releases its engine, otherwise both fight over the presenter
+    private static final long START_DELAY_MS = 1200;
+    private static final long HINT_HIDE_DELAY_MS = 7_000;
 
-    private EmbedPlayerView mPlayer;
-    private FrameLayout mBar;
-    private Video mPendingVideo;
-    private Activity mActivity;      // the activity that is currently resumed (and may host the bar)
-    private View mShiftedChild;
-    private int mOrigTopMargin;
-    private int mRetries;
-    private final Runnable mTryStart = this::tryStart;
+    private static Video sVideo;
+    private static long sPositionMs;
+    private static Activity sHost;
+    private static FrameLayout sContainer;
+    private static EmbedPlayerView sPlayerView;
+    private static boolean sLongPressHandled;
+    private static Activity sPendingHost;
+    private static final Runnable sStartRunnable = MiniPlayerManager::startPending;
 
     private MiniPlayerManager() {
     }
 
-    public static MiniPlayerManager instance() {
-        if (sInstance == null) {
-            sInstance = new MiniPlayerManager();
+    /**
+     * Called by the fullscreen player when the user leaves it with the Back button.
+     */
+    public static void capture(Video video, long positionMs) {
+        if (video == null) {
+            return;
         }
-        return sInstance;
+
+        sVideo = Video.from(video);
+        sPositionMs = Math.max(positionMs, 0);
     }
 
-    public boolean isActive() {
-        return mPlayer != null || mPendingVideo != null;
+    public static boolean isActive() {
+        return sVideo != null;
+    }
+
+    public static void onActivityResumed(Activity activity) {
+        if (activity instanceof PlaybackActivity) {
+            // Fullscreen player takes over
+            dismiss();
+            return;
+        }
+
+        if (sVideo == null || !MiniPlayerData.instance(activity).isEnabled()) {
+            return;
+        }
+
+        if (sPlayerView != null && sHost == activity) {
+            return;
+        }
+
+        // Moving to another browse screen: remember position and recreate the window there
+        savePositionAndDestroyView();
+
+        sPendingHost = activity;
+        Utils.removeCallbacks(sStartRunnable);
+        Utils.postDelayed(sStartRunnable, START_DELAY_MS);
+    }
+
+    public static void onActivityStopped(Activity activity) {
+        if (sPendingHost == activity) {
+            sPendingHost = null;
+            Utils.removeCallbacks(sStartRunnable);
+        }
+
+        if (sHost == activity) {
+            savePositionAndDestroyView();
+        }
     }
 
     /**
-     * Called when the user leaves the fullscreen player with Back: playback continues in the mini bar.
+     * @return true when the event has been consumed
      */
-    public void enterFrom(Video video, long positionMs) {
-        if (video == null || video.videoId == null) {
+    public static boolean handleKeyEvent(Activity activity, KeyEvent event) {
+        if (sPlayerView == null || sHost != activity || activity instanceof PlaybackActivity) {
+            return false;
+        }
+
+        int keyCode = event.getKeyCode();
+
+        if (keyCode == KeyEvent.KEYCODE_MEDIA_STOP) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                dismiss();
+            }
+            return true;
+        }
+
+        if (keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                if (event.getRepeatCount() > 0 && !sLongPressHandled) {
+                    sLongPressHandled = true;
+                    expand();
+                }
+            } else if (event.getAction() == KeyEvent.ACTION_UP) {
+                if (!sLongPressHandled) {
+                    togglePlayPause();
+                }
+                sLongPressHandled = false;
+            }
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Closes the window and forgets the video (e.g. new fullscreen playback or app exit).
+     */
+    public static void dismiss() {
+        Utils.removeCallbacks(sStartRunnable);
+        sPendingHost = null;
+        destroyView();
+        sVideo = null;
+        sPositionMs = 0;
+        sLongPressHandled = false;
+    }
+
+    private static void startPending() {
+        Activity activity = sPendingHost;
+        sPendingHost = null;
+
+        if (activity == null || sVideo == null || activity.isFinishing() || activity.isDestroyed()) {
             return;
         }
 
-        stop(); // only one mini player at a time
-        video.pendingPosMs = positionMs;
-        mPendingVideo = video;
-        mRetries = 0;
-        // The fullscreen engine is released only after the browse activity is resumed: wait for it
-        Utils.postDelayed(mTryStart, 600);
-    }
-
-    public void onActivityResumed(Activity activity) {
-        mActivity = activity;
-
-        if (activity instanceof PlaybackActivity) {
-            stop(); // fullscreen playback takes over
+        // Fullscreen playback is still alive. Don't interfere
+        PlaybackPresenter presenter = PlaybackPresenter.instance(activity);
+        if (presenter.getView() != null && !presenter.getView().isEmbed() && presenter.isEngineInitialized()) {
             return;
         }
 
-        if (mPlayer != null) {
-            attach(activity);
+        createView(activity);
+    }
+
+    private static void createView(Activity activity) {
+        ViewGroup root = activity.findViewById(android.R.id.content);
+
+        if (root == null) {
+            return;
+        }
+
+        destroyView();
+
+        MiniPlayerData data = MiniPlayerData.instance(activity);
+
+        int screenWidth = activity.getResources().getDisplayMetrics().widthPixels;
+        int width = (int) (screenWidth * data.getSizePercent() / 100f);
+        int height = width * 9 / 16;
+        int margin = (int) (activity.getResources().getDisplayMetrics().density * 24);
+
+        FrameLayout container = new FrameLayout(activity);
+        container.setBackgroundColor(Color.BLACK);
+        container.setFocusable(false);
+        container.setFocusableInTouchMode(false);
+        container.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+
+        EmbedPlayerView playerView = new EmbedPlayerView(activity);
+        playerView.setQuality(EmbedPlayerView.QUALITY_NORMAL);
+        playerView.setVideoFormat(getVideoFormat(data.getQuality()));
+        playerView.setUseController(false);
+        playerView.setBackgroundColor(Color.BLACK);
+        playerView.setFocusable(false);
+        playerView.setOnClickListener(v -> expand()); // touch devices
+        container.addView(playerView, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        TextView hint = new TextView(activity);
+        hint.setText(R.string.mini_player_hint);
+        hint.setTextColor(Color.WHITE);
+        hint.setTextSize(12);
+        hint.setBackgroundColor(0xAA000000);
+        hint.setPadding(margin / 2, margin / 4, margin / 2, margin / 4);
+        hint.setGravity(Gravity.CENTER);
+        container.addView(hint, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM));
+        Utils.postDelayed(() -> hint.setVisibility(View.GONE), HINT_HIDE_DELAY_MS);
+
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(width, height, getGravity(data.getPosition()));
+        lp.setMargins(margin, margin, margin, margin);
+        root.addView(container, lp);
+
+        sHost = activity;
+        sContainer = container;
+        sPlayerView = playerView;
+
+        Video video = Video.from(sVideo);
+        video.pendingPosMs = sPositionMs;
+
+        try {
+            playerView.openVideo(video);
+        } catch (Exception e) {
+            Log.e(TAG, "Mini player failed to start: %s", e.getMessage());
+            dismiss();
         }
     }
 
-    public void onActivityPaused(Activity activity) {
-        if (mActivity == activity) {
-            detach();
-            mActivity = null;
-        }
-    }
-
-    public void stop() {
-        Utils.removeCallbacks(mTryStart);
-        mPendingVideo = null;
-        detach();
-        if (mPlayer != null) {
+    private static void savePositionAndDestroyView() {
+        if (sPlayerView != null) {
             try {
-                mPlayer.finish();
+                if (sPlayerView.isEngineInitialized()) {
+                    long position = sPlayerView.getPositionMs();
+                    if (position > 0) {
+                        sPositionMs = position;
+                    }
+                }
             } catch (Exception e) {
-                // ignore: the engine may be already released
+                Log.e(TAG, "Can't read mini player position: %s", e.getMessage());
             }
-            mPlayer = null;
         }
-        mBar = null;
+
+        destroyView();
     }
 
-    private void tryStart() {
-        if (mPendingVideo == null) {
-            return;
-        }
-
-        Activity activity = mActivity;
-        PlaybackPresenter presenter = activity != null ? PlaybackPresenter.instance(activity) : null;
-        PlaybackView view = presenter != null ? presenter.getView() : null;
-        boolean fullscreenStillAlive = view != null && !(view instanceof EmbedPlayerView) && presenter.isEngineInitialized();
-
-        if (activity == null || activity instanceof PlaybackActivity || fullscreenStillAlive) {
-            if (++mRetries <= 10) {
-                Utils.postDelayed(mTryStart, 500);
-            } else {
-                mPendingVideo = null; // give up
+    private static void destroyView() {
+        if (sContainer != null) {
+            ViewGroup parent = (ViewGroup) sContainer.getParent();
+            if (parent != null) {
+                parent.removeView(sContainer);
             }
+        }
+
+        if (sPlayerView != null) {
+            sPlayerView.finish();
+        }
+
+        sContainer = null;
+        sPlayerView = null;
+        sHost = null;
+    }
+
+    private static void togglePlayPause() {
+        if (sPlayerView != null && sPlayerView.isEngineInitialized()) {
+            sPlayerView.setPlayWhenReady(!sPlayerView.getPlayWhenReady());
+        }
+    }
+
+    private static void expand() {
+        if (sPlayerView == null || sVideo == null) {
             return;
         }
 
-        Video video = mPendingVideo;
-        mPendingVideo = null;
+        Activity host = sHost;
+        long position = sPositionMs;
 
-        mPlayer = new EmbedPlayerView(activity);
-        mPlayer.setQuality(EmbedPlayerView.QUALITY_NORMAL);
-        mPlayer.setUseController(false);
-        mPlayer.setBackgroundColor(Color.BLACK);
-        mBar = buildBar(activity);
-        attach(activity);
-        mPlayer.openVideo(video);
-    }
-
-    private FrameLayout buildBar(Activity activity) {
-        FrameLayout bar = new FrameLayout(activity);
-        bar.setBackgroundColor(Color.BLACK);
-        bar.setClickable(true);
-
-        bar.addView(mPlayer, new FrameLayout.LayoutParams(0, 0)); // real size is set in attach()
-
-        View tap = new View(activity);
-        tap.setOnClickListener(v -> togglePlay());
-        bar.addView(tap, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-
-        // Right to left: close, expand, play/pause
-        addButton(bar, activity, "\u2715", 0, v -> stop());
-        addButton(bar, activity, "\u26F6", 1, v -> expand());
-        addButton(bar, activity, "\u23EF", 2, v -> togglePlay());
-
-        return bar;
-    }
-
-    private void addButton(FrameLayout bar, Activity activity, String text, int index, View.OnClickListener listener) {
-        TextView button = new TextView(activity);
-        button.setText(text);
-        button.setTextColor(Color.WHITE);
-        button.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
-        button.setGravity(Gravity.CENTER);
-        button.setBackgroundColor(0x99000000);
-        button.setFocusable(true);
-        button.setOnClickListener(listener);
-
-        int size = dp(activity, 44);
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(size, size, Gravity.TOP | Gravity.END);
-        lp.setMarginEnd(index * (size + dp(activity, 4)) + dp(activity, 4));
-        lp.topMargin = dp(activity, 4);
-        bar.addView(button, lp);
-    }
-
-    private void togglePlay() {
-        if (mPlayer != null) {
-            mPlayer.setPlayWhenReady(!mPlayer.isPlaying());
-        }
-    }
-
-    private void expand() {
-        if (mPlayer == null || mActivity == null) {
-            return;
-        }
-
-        Activity activity = mActivity;
-        Video video = mPlayer.getVideo();
-        long positionMs = mPlayer.getPositionMs();
-        stop();
-
-        if (video != null) {
-            video.pendingPosMs = positionMs;
-            PlaybackPresenter.instance(activity).openVideo(video);
-        }
-    }
-
-    private void attach(Activity activity) {
-        detach();
-
-        ViewGroup content = activity.findViewById(android.R.id.content);
-        if (content == null || mBar == null || content.getChildCount() == 0) {
-            return;
-        }
-
-        DisplayMetrics dm = activity.getResources().getDisplayMetrics();
-        int width = content.getWidth() > 0 ? content.getWidth() : dm.widthPixels;
-        int height = Math.min(width * 9 / 16, dm.heightPixels * 35 / 100);
-        int playerWidth = Math.min(width, height * 16 / 9);
-
-        FrameLayout.LayoutParams playerLp = new FrameLayout.LayoutParams(playerWidth, height, Gravity.CENTER_HORIZONTAL);
-        mPlayer.setLayoutParams(playerLp);
-
-        // Push the screen content down so the bar doesn't cover it
-        View child = content.getChildAt(0);
-        ViewGroup.LayoutParams lp = child.getLayoutParams();
-        if (lp instanceof ViewGroup.MarginLayoutParams) {
-            ViewGroup.MarginLayoutParams mlp = (ViewGroup.MarginLayoutParams) lp;
-            mShiftedChild = child;
-            mOrigTopMargin = mlp.topMargin;
-            mlp.topMargin = height;
-            child.setLayoutParams(mlp);
-        }
-
-        content.addView(mBar, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, height, Gravity.TOP));
-        mBar.bringToFront();
-    }
-
-    private void detach() {
-        if (mBar != null && mBar.getParent() instanceof ViewGroup) {
-            ((ViewGroup) mBar.getParent()).removeView(mBar);
-        }
-
-        if (mShiftedChild != null) {
-            ViewGroup.LayoutParams lp = mShiftedChild.getLayoutParams();
-            if (lp instanceof ViewGroup.MarginLayoutParams) {
-                ((ViewGroup.MarginLayoutParams) lp).topMargin = mOrigTopMargin;
-                mShiftedChild.setLayoutParams(lp);
+        try {
+            if (sPlayerView.isEngineInitialized() && sPlayerView.getPositionMs() > 0) {
+                position = sPlayerView.getPositionMs();
             }
-            mShiftedChild = null;
+        } catch (Exception e) {
+            // use the saved one
+        }
+
+        Video video = Video.from(sVideo);
+        video.pendingPosMs = position;
+
+        dismiss();
+
+        if (host != null) {
+            PlaybackPresenter.instance(host).openVideo(video);
         }
     }
 
-    private static int dp(Activity activity, int value) {
-        return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value, activity.getResources().getDisplayMetrics());
+    private static ExoFormatItem getVideoFormat(int height) {
+        int width;
+
+        switch (height) {
+            case 144:
+                width = 256;
+                break;
+            case 240:
+                width = 426;
+                break;
+            case 480:
+                width = 854;
+                break;
+            case 720:
+                width = 1280;
+                break;
+            case 1080:
+                width = 1920;
+                break;
+            default:
+                height = 360;
+                width = 640;
+        }
+
+        return ExoFormatItem.fromVideoSpec(width + "," + height + ",30,avc", false);
+    }
+
+    private static int getGravity(int position) {
+        switch (position) {
+            case MiniPlayerData.POSITION_BOTTOM_LEFT:
+                return Gravity.BOTTOM | Gravity.LEFT;
+            case MiniPlayerData.POSITION_TOP_RIGHT:
+                return Gravity.TOP | Gravity.RIGHT;
+            case MiniPlayerData.POSITION_TOP_LEFT:
+                return Gravity.TOP | Gravity.LEFT;
+            default:
+                return Gravity.BOTTOM | Gravity.RIGHT;
+        }
     }
 }

@@ -1,5 +1,6 @@
 package com.liskovsoft.smartyoutubetv2.tv.ui.mod.leanback.misc;
 
+import android.graphics.drawable.Drawable;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -12,6 +13,7 @@ import androidx.leanback.app.VerticalGridFragment;
 
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
 import com.liskovsoft.smartyoutubetv2.tv.R;
+import com.liskovsoft.smartyoutubetv2.tv.ui.widgets.loading.LoadingSpinnerDrawable;
 
 /**
  * Manager for showing/hiding progress bar widget. This class lets user specify an initial
@@ -65,12 +67,15 @@ public final class ProgressBarManager {
         ProgressBar progressBarView = new ProgressBar(
                 rootView.getContext(), null, android.R.attr.progressBarStyleLarge);
         progressBarView.setIndeterminate(true);
-        progressBarView.setIndeterminateDrawable(
+        Drawable customSpinner = LoadingSpinnerDrawable.createFromPrefs(rootView.getContext());
+        progressBarView.setIndeterminateDrawable(customSpinner != null ? customSpinner :
                 ContextCompat.getDrawable(rootView.getContext(), R.drawable.progress_large_holo));
 
-        FrameLayout.LayoutParams progressBarParams = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT);
+        FrameLayout.LayoutParams progressBarParams = customSpinner != null ?
+                new FrameLayout.LayoutParams(customSpinner.getIntrinsicWidth(), customSpinner.getIntrinsicHeight()) :
+                new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        FrameLayout.LayoutParams.WRAP_CONTENT);
         progressBarParams.gravity = position;
         rootView.addView(progressBarView, progressBarParams);
 

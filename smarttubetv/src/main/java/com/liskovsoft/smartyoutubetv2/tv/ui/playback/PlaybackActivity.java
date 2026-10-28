@@ -12,15 +12,16 @@ import androidx.fragment.app.Fragment;
 
 import com.liskovsoft.sharedutils.helpers.Helpers;
 import com.liskovsoft.sharedutils.mylogger.Log;
+import com.liskovsoft.smartyoutubetv2.common.app.models.data.Video;
 import com.liskovsoft.smartyoutubetv2.common.app.models.playback.manager.PlayerEngine;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.AppDialogPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.views.PlaybackView;
 import com.liskovsoft.smartyoutubetv2.common.prefs.GeneralData;
 import com.liskovsoft.smartyoutubetv2.common.prefs.MainUIData;
+import com.liskovsoft.smartyoutubetv2.common.prefs.MiniPlayerData;
 import com.liskovsoft.smartyoutubetv2.common.prefs.PlayerData;
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
 import com.liskovsoft.smartyoutubetv2.tv.R;
-import com.liskovsoft.smartyoutubetv2.common.misc.MiniPlayerPrefs;
 import com.liskovsoft.smartyoutubetv2.tv.ui.common.LeanbackActivity;
 import com.liskovsoft.smartyoutubetv2.tv.ui.widgets.miniplayer.MiniPlayerManager;
 
@@ -161,11 +162,6 @@ public class PlaybackActivity extends LeanbackActivity {
     public void finish() {
         Log.d(TAG, "Finishing activity...");
 
-        // Mini player: keep the video running on top of the browse screens after the user pressed Back
-        mMiniPlayerOnExit = isBackPressed() &&
-                MiniPlayerPrefs.isEnabled(this) &&
-                getPlayerData().getBackgroundMode() == PlayerData.BACKGROUND_MODE_DEFAULT;
-
         //if (isBackgroundBackEnabled()) {
         //    mPlaybackFragment.blockEngine(true);
         //}
@@ -201,11 +197,44 @@ public class PlaybackActivity extends LeanbackActivity {
 
     @Override
     public void finishReally() {
-        enterMiniPlayerIfNeeded();
+        captureForMiniPlayer();
 
         super.finishReally();
 
         mPlaybackFragment.onFinish();
+    }
+
+    /**
+     * Hands the current video over to the in-app mini player when the user leaves the fullscreen player with Back.
+     */
+    private void captureForMiniPlayer() {
+        try {
+            if (!isBackPressed() || mPlaybackFragment == null || !MiniPlayerData.instance(this).isEnabled()) {
+                return;
+            }
+
+            if (Build.VERSION.SDK_INT >= 24 && isInPictureInPictureMode()) {
+                return;
+            }
+
+            Video video = mPlaybackFragment.getVideo();
+
+            if (video == null || video.videoId == null) {
+                return;
+            }
+
+            long positionMs = mPlaybackFragment.getPositionMs();
+            long durationMs = mPlaybackFragment.getDurationMs();
+
+            // Video is over. Nothing to keep
+            if (durationMs > 0 && positionMs >= durationMs - 3_000) {
+                return;
+            }
+
+            MiniPlayerManager.capture(video, video.isLive ? 0 : positionMs);
+        } catch (Exception e) {
+            Log.e(TAG, "Can't hand over the video to the mini player: %s", e.getMessage());
+        }
     }
 
     @Override
@@ -293,30 +322,6 @@ public class PlaybackActivity extends LeanbackActivity {
                     //getViewManager().enableMoveToBack(true);
                 }
                 break;
-        }
-    }
-
-    private boolean mMiniPlayerOnExit;
-
-    private void enterMiniPlayerIfNeeded() {
-        if (!mMiniPlayerOnExit || mPlaybackFragment == null) {
-            return;
-        }
-
-        mMiniPlayerOnExit = false;
-
-        try {
-            PlaybackView view = getPlaybackView();
-            com.liskovsoft.smartyoutubetv2.common.app.models.data.Video video = view != null ? view.getVideo() : null;
-            long duration = view != null ? view.getDurationMs() : 0;
-            long position = view != null ? view.getPositionMs() : 0;
-            boolean ended = duration > 0 && position >= duration - 3_000;
-
-            if (video != null && !ended) {
-                MiniPlayerManager.instance().enterFrom(video, position);
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Mini player start failed: " + e.getMessage());
         }
     }
 

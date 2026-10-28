@@ -22,7 +22,9 @@ import com.liskovsoft.smartyoutubetv2.common.app.presenters.service.SidebarServi
 import com.liskovsoft.smartyoutubetv2.common.misc.MediaServiceManager;
 import com.liskovsoft.smartyoutubetv2.common.prefs.AppPrefs;
 import com.liskovsoft.smartyoutubetv2.common.prefs.GeneralData;
+import com.liskovsoft.smartyoutubetv2.common.prefs.LoadingSpinnerData;
 import com.liskovsoft.smartyoutubetv2.common.prefs.MainUIData;
+import com.liskovsoft.smartyoutubetv2.common.prefs.MiniPlayerData;
 import com.liskovsoft.smartyoutubetv2.common.prefs.NetworkData;
 import com.liskovsoft.smartyoutubetv2.common.prefs.PlayerData;
 import com.liskovsoft.smartyoutubetv2.common.prefs.PlayerTweaksData;
@@ -79,6 +81,8 @@ public class GeneralSettingsPresenter extends BasePresenter<Void> {
         appendContextMenuItemsCategory(settingsPresenter);
         appendHideContent(settingsPresenter);
         appendAppExitCategory(settingsPresenter);
+        appendMiniPlayerCategory(settingsPresenter);
+        appendLoadingSpinnerCategory(settingsPresenter);
         appendBackgroundPlaybackCategory(settingsPresenter);
         appendScreenDimmingCategory(settingsPresenter);
         appendKeyRemappingCategory(settingsPresenter);
@@ -314,6 +318,104 @@ public class GeneralSettingsPresenter extends BasePresenter<Void> {
         }
 
         settingsPresenter.appendRadioCategory(getContext().getString(R.string.app_exit_shortcut), options);
+    }
+
+    /**
+     * In-app mini player: Back button inside the player shrinks the video into a small corner window
+     * and returns to browsing. Position and size are configurable.
+     */
+    private void appendMiniPlayerCategory(AppDialogPresenter settingsPresenter) {
+        MiniPlayerData data = MiniPlayerData.instance(getContext());
+
+        settingsPresenter.appendSingleSwitch(UiOptionItem.from(
+                getContext().getString(R.string.mini_player_title),
+                option -> data.setEnabled(option.isSelected()),
+                data.isEnabled()));
+
+        List<OptionItem> positions = new ArrayList<>();
+        int[] positionIds = {MiniPlayerData.POSITION_BOTTOM_RIGHT, MiniPlayerData.POSITION_BOTTOM_LEFT,
+                MiniPlayerData.POSITION_TOP_RIGHT, MiniPlayerData.POSITION_TOP_LEFT};
+        int[] positionTitles = {R.string.mini_player_pos_bottom_right, R.string.mini_player_pos_bottom_left,
+                R.string.mini_player_pos_top_right, R.string.mini_player_pos_top_left};
+
+        for (int i = 0; i < positionIds.length; i++) {
+            int id = positionIds[i];
+            positions.add(UiOptionItem.from(getContext().getString(positionTitles[i]),
+                    option -> data.setPosition(id), data.getPosition() == id));
+        }
+
+        settingsPresenter.appendRadioCategory(getContext().getString(R.string.mini_player_position), positions);
+
+        List<OptionItem> sizes = new ArrayList<>();
+
+        for (int percent = MiniPlayerData.MIN_SIZE_PERCENT; percent <= MiniPlayerData.MAX_SIZE_PERCENT;
+             percent += MiniPlayerData.SIZE_STEP_PERCENT) {
+            int value = percent;
+            sizes.add(UiOptionItem.from(value + "%",
+                    option -> data.setSizePercent(value), data.getSizePercent() == value));
+        }
+
+        settingsPresenter.appendRadioCategory(getContext().getString(R.string.mini_player_size), sizes);
+
+        List<OptionItem> qualities = new ArrayList<>();
+
+        for (int height : MiniPlayerData.QUALITIES) {
+            qualities.add(UiOptionItem.from(height + "p",
+                    option -> data.setQuality(height), data.getQuality() == height));
+        }
+
+        settingsPresenter.appendRadioCategory(getContext().getString(R.string.mini_player_quality), qualities);
+    }
+
+    /**
+     * Style of the loading indicator (video loading, screens loading).
+     */
+    private void appendLoadingSpinnerCategory(AppDialogPresenter settingsPresenter) {
+        LoadingSpinnerData data = LoadingSpinnerData.instance(getContext());
+
+        int[] titles = {
+                R.string.loading_spinner_style_0, R.string.loading_spinner_style_1, R.string.loading_spinner_style_2,
+                R.string.loading_spinner_style_3, R.string.loading_spinner_style_4, R.string.loading_spinner_style_5,
+                R.string.loading_spinner_style_6, R.string.loading_spinner_style_7, R.string.loading_spinner_style_8,
+                R.string.loading_spinner_style_9, R.string.loading_spinner_style_10, R.string.loading_spinner_style_11
+        };
+
+        List<OptionItem> options = new ArrayList<>();
+
+        for (int i = 0; i < titles.length; i++) {
+            int style = i;
+            options.add(UiOptionItem.from(getContext().getString(titles[i]),
+                    option -> data.setStyle(style), data.getStyle() == style));
+        }
+
+        settingsPresenter.appendRadioCategory(getContext().getString(R.string.loading_spinner_title), options);
+
+        int[] colorTitles = {
+                R.string.loading_spinner_color_0, R.string.loading_spinner_color_1, R.string.loading_spinner_color_2,
+                R.string.loading_spinner_color_3, R.string.loading_spinner_color_4, R.string.loading_spinner_color_5,
+                R.string.loading_spinner_color_6, R.string.loading_spinner_color_7, R.string.loading_spinner_color_8,
+                R.string.loading_spinner_color_9
+        };
+
+        List<OptionItem> colors = new ArrayList<>();
+
+        for (int i = 0; i < colorTitles.length; i++) {
+            int index = i;
+            colors.add(UiOptionItem.from(getContext().getString(colorTitles[i]),
+                    option -> data.setColorIndex(index), data.getColorIndex() == index));
+        }
+
+        settingsPresenter.appendRadioCategory(getContext().getString(R.string.loading_spinner_color), colors);
+
+        List<OptionItem> sizes = new ArrayList<>();
+
+        for (int dp = LoadingSpinnerData.MIN_SIZE_DP; dp <= LoadingSpinnerData.MAX_SIZE_DP; dp += LoadingSpinnerData.SIZE_STEP_DP) {
+            int value = dp;
+            sizes.add(UiOptionItem.from(value + " dp",
+                    option -> data.setSizeDp(value), data.getSizeDp() == value));
+        }
+
+        settingsPresenter.appendRadioCategory(getContext().getString(R.string.loading_spinner_size), sizes);
     }
 
     private void appendBackgroundPlaybackCategory(AppDialogPresenter settingsPresenter) {

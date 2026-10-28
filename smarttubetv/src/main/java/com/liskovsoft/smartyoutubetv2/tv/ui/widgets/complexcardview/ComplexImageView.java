@@ -17,6 +17,7 @@ import com.liskovsoft.smartyoutubetv2.common.app.models.data.Video;
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
 import com.liskovsoft.smartyoutubetv2.tv.R;
 import com.liskovsoft.smartyoutubetv2.tv.ui.widgets.embedplayer.EmbedPlayerView;
+import com.liskovsoft.smartyoutubetv2.tv.ui.widgets.miniplayer.MiniPlayerManager;
 import com.liskovsoft.smartyoutubetv2.tv.util.ViewUtil;
 
 import java.lang.ref.WeakReference;
@@ -172,8 +173,8 @@ public class ComplexImageView extends RelativeLayout {
     }
 
     private void createAndStartPlayer() {
-        if (getVideo() == null || com.liskovsoft.smartyoutubetv2.tv.ui.widgets.miniplayer.MiniPlayerManager.instance().isActive()) {
-            return; // the mini player owns the embed engine
+        if (getVideo() == null || MiniPlayerManager.isActive()) {
+            return;
         }
 
         if (mPreviewPlayer == null) {

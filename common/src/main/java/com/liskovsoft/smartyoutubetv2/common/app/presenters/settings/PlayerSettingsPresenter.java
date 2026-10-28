@@ -388,10 +388,6 @@ public class PlayerSettingsPresenter extends BasePresenter<Void> {
                 option -> mSearchData.setTempBackgroundModeEnabled(option.isSelected()),
                 mSearchData.isTempBackgroundModeEnabled()));
 
-        options.add(UiOptionItem.from(getContext().getString(R.string.mini_player),
-                option -> com.liskovsoft.smartyoutubetv2.common.misc.MiniPlayerPrefs.setEnabled(getContext(), option.isSelected()),
-                com.liskovsoft.smartyoutubetv2.common.misc.MiniPlayerPrefs.isEnabled(getContext())));
-
         options.add(UiOptionItem.from(getContext().getString(R.string.player_exit_shortcut) + ": " + getContext().getString(R.string.app_double_back_exit),
                 option -> mGeneralData.setPlayerExitShortcut(option.isSelected() ? GeneralData.EXIT_DOUBLE_BACK : GeneralData.EXIT_SINGLE_BACK),
                 mGeneralData.getPlayerExitShortcut() == GeneralData.EXIT_DOUBLE_BACK));

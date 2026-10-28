@@ -46,6 +46,7 @@ public class EmbedPlayerView extends PlayerView implements PlaybackView {
     private final Runnable mShowView = this::showView;
     private final Runnable mStopPlayback = this::finish;
     private int mQuality;
+    private FormatItem mCustomVideoFormat;
     private float mPercentWatched;
 
     public EmbedPlayerView(Context context) {
@@ -508,6 +509,13 @@ public class EmbedPlayerView extends PlayerView implements PlaybackView {
         mQuality = quality;
     }
 
+    /**
+     * Overrides the quality preset with the exact video format.
+     */
+    public void setVideoFormat(FormatItem format) {
+        mCustomVideoFormat = format;
+    }
+
     public void openVideo(String videoId) {
         openVideo(Video.from(videoId));
     }
@@ -563,7 +571,8 @@ public class EmbedPlayerView extends PlayerView implements PlaybackView {
         //mPlayer.setRepeatMode(Player.REPEAT_MODE_ONE);
 
         mExoPlayerController.setPlayer(mPlayer);
-        mExoPlayerController.selectFormat(mQuality == QUALITY_LOW ? FormatItem.VIDEO_SUB_SD_AVC_30 : FormatItem.VIDEO_SD_AVC_30);
+        mExoPlayerController.selectFormat(mCustomVideoFormat != null ? mCustomVideoFormat :
+                (mQuality == QUALITY_LOW ? FormatItem.VIDEO_SUB_SD_AVC_30 : FormatItem.VIDEO_SD_AVC_30));
         // Don't use subs! Not efficient. High cpu load. Cause input lags.
         mExoPlayerController.selectFormat(FormatItem.SUBTITLE_NONE);
         if (mIsMute) {

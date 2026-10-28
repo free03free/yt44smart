@@ -14,8 +14,8 @@ import com.liskovsoft.smartyoutubetv2.common.prefs.GeneralData;
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
 import com.liskovsoft.smartyoutubetv2.tv.ui.common.keyhandler.DoubleBackManager2;
 import com.liskovsoft.smartyoutubetv2.tv.ui.playback.PlaybackActivity;
-import com.liskovsoft.smartyoutubetv2.tv.ui.widgets.miniplayer.MiniPlayerManager;
 import com.liskovsoft.smartyoutubetv2.tv.ui.search.tags.SearchTagsActivity;
+import com.liskovsoft.smartyoutubetv2.tv.ui.widgets.miniplayer.MiniPlayerManager;
 
 /**
  * This parent class contains common methods that run in every activity such as search.
@@ -51,6 +51,10 @@ public abstract class LeanbackActivity extends MotherActivity {
     public boolean dispatchKeyEvent(KeyEvent event) {
         Log.d(TAG, event);
 
+        if (MiniPlayerManager.handleKeyEvent(this, event)) {
+            return true;
+        }
+
         KeyEvent newEvent = mGlobalKeyTranslator.translate(event);
         return super.dispatchKeyEvent(newEvent);
     }
@@ -78,20 +82,14 @@ public abstract class LeanbackActivity extends MotherActivity {
 
         getViewManager().addTop(this);
 
-        MiniPlayerManager.instance().onActivityResumed(this);
-    }
-
-    @Override
-    protected void onPause() {
-        MiniPlayerManager.instance().onActivityPaused(this);
-
-        super.onPause();
+        MiniPlayerManager.onActivityResumed(this);
     }
 
     @Override
     protected void onStop() {
         super.onStop();
         mBackgroundManager.onStop();
+        MiniPlayerManager.onActivityStopped(this);
     }
 
     @Override
@@ -143,6 +141,7 @@ public abstract class LeanbackActivity extends MotherActivity {
     }
 
     private void finishTheApp() {
+        MiniPlayerManager.dismiss();
         getViewManager().addOnFinish(sOnFinish);
 
         Utils.properlyFinishTheApp(this);
