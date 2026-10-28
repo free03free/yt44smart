@@ -84,6 +84,28 @@ public class NavigateTitleView extends TitleView implements OnDataChange, Accoun
         // findViewById is null in constructor. Init mAccountView later.
     }
 
+    private boolean mTopBarHidden;
+    private int mRequestedVisibility = View.VISIBLE;
+
+    /**
+     * Hides the whole bar (logo, clock, search, account). Leanback keeps changing the visibility itself,
+     * so the requested value is remembered and restored when the bar is shown again.
+     */
+    public void setTopBarHidden(boolean hidden) {
+        if (mTopBarHidden == hidden) {
+            return;
+        }
+
+        mTopBarHidden = hidden;
+        super.setVisibility(hidden ? View.GONE : mRequestedVisibility);
+    }
+
+    @Override
+    public void setVisibility(int visibility) {
+        mRequestedVisibility = visibility;
+        super.setVisibility(mTopBarHidden ? View.GONE : visibility);
+    }
+
     @Override
     public View focusSearch(View focused, int direction) {
         View nextFoundFocusableViewInLayout = null;

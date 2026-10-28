@@ -1703,6 +1703,29 @@ public class BrowseSupportFragment extends BaseSupportFragment {
         new ExpandPreLayout(callback, mMainFragmentAdapter, getView()).execute();
     }
 
+    /**
+     * MOD: change the top alignment of the headers and rows at runtime (e.g. when the title bar is hidden).
+     */
+    public void setContainerListAlignTop(int alignTopPx) {
+        mContainerListAlignTop = alignTopPx;
+
+        if (mScaleFrameLayout != null) {
+            mScaleFrameLayout.setPivotY(alignTopPx);
+        }
+
+        if (mHeadersSupportFragment != null) {
+            mHeadersSupportFragment.setAlignment(alignTopPx);
+        }
+
+        if (mMainFragmentAdapter != null) {
+            setMainFragmentAlignment();
+        }
+    }
+
+    public int getContainerListAlignTop() {
+        return mContainerListAlignTop;
+    }
+
     private void setMainFragmentAlignment() {
         int alignOffset = mContainerListAlignTop;
         if (mMainFragmentScaleEnabled

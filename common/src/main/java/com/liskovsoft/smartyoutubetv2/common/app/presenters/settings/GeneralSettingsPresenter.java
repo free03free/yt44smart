@@ -362,6 +362,19 @@ public class GeneralSettingsPresenter extends BasePresenter<Void> {
 
         settingsPresenter.appendRadioCategory(getContext().getString(R.string.mini_player_size), sizes);
 
+        List<OptionItem> topBar = new ArrayList<>();
+        int[] topBarIds = {MiniPlayerData.TOP_BAR_SHOW, MiniPlayerData.TOP_BAR_HIDE_WITH_MINI, MiniPlayerData.TOP_BAR_HIDE_ALWAYS};
+        int[] topBarTitles = {R.string.mini_player_top_bar_show, R.string.mini_player_top_bar_hide_with_mini,
+                R.string.mini_player_top_bar_hide_always};
+
+        for (int i = 0; i < topBarIds.length; i++) {
+            int id = topBarIds[i];
+            topBar.add(UiOptionItem.from(getContext().getString(topBarTitles[i]),
+                    option -> data.setTopBarMode(id), data.getTopBarMode() == id));
+        }
+
+        settingsPresenter.appendRadioCategory(getContext().getString(R.string.mini_player_top_bar), topBar);
+
         List<OptionItem> qualities = new ArrayList<>();
 
         for (int height : MiniPlayerData.QUALITIES) {

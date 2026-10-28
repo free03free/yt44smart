@@ -923,6 +923,10 @@
     <string name="mini_player_pos_top_right">Top right</string>
     <string name="mini_player_pos_top_left">Top left</string>
     <string name="mini_player_size">Mini player size (percent of screen width)</string>
+    <string name="mini_player_top_bar">Top bar (logo, clock, search, account)</string>
+    <string name="mini_player_top_bar_show">Always show</string>
+    <string name="mini_player_top_bar_hide_with_mini">Hide while the mini window is visible</string>
+    <string name="mini_player_top_bar_hide_always">Always hide (more room for the rows)</string>
     <string name="mini_player_quality">Mini player quality (higher uses more bandwidth and CPU)</string>
     <string name="loading_spinner_title">Loading indicator</string>
     <string name="loading_spinner_style_0">Default</string>

@@ -32,12 +32,15 @@ import com.liskovsoft.smartyoutubetv2.common.app.presenters.SearchPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.SplashPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.views.BrowseView;
 import com.liskovsoft.smartyoutubetv2.common.misc.CrashRestorer;
+import com.liskovsoft.smartyoutubetv2.common.prefs.MiniPlayerData;
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
 import com.liskovsoft.smartyoutubetv2.tv.R;
 import com.liskovsoft.smartyoutubetv2.tv.presenter.IconHeaderItemPresenter;
 import com.liskovsoft.smartyoutubetv2.tv.ui.browse.dialog.ErrorDialogFragment;
 import com.liskovsoft.smartyoutubetv2.tv.ui.mod.leanback.headers.ExtendedHeadersSupportFragment;
 import com.liskovsoft.smartyoutubetv2.tv.ui.mod.leanback.misc.ProgressBarManager;
+import com.liskovsoft.smartyoutubetv2.tv.ui.widgets.browse.NavigateTitleView;
+import com.liskovsoft.smartyoutubetv2.tv.ui.widgets.miniplayer.MiniPlayerManager;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -470,6 +473,34 @@ public class BrowseFragment extends BrowseSupportFragment implements BrowseView 
         }
 
         mIsFragmentCreated = false;
+
+        applyTopBarMode(MiniPlayerManager.isActive());
+    }
+
+    private int mDefaultAlignTop = -1;
+
+    /**
+     * Hides (or restores) the top bar with the logo, clock, search and account buttons according to the settings.
+     * The rows and the side menu move up to use the freed space.
+     */
+    public void applyTopBarMode(boolean miniWindowVisible) {
+        if (getContext() == null || getView() == null) {
+            return;
+        }
+
+        boolean hide = MiniPlayerData.instance(getContext()).isTopBarHidden(miniWindowVisible);
+        View titleView = getTitleView();
+
+        if (titleView instanceof NavigateTitleView) {
+            ((NavigateTitleView) titleView).setTopBarHidden(hide);
+        }
+
+        if (mDefaultAlignTop < 0) {
+            mDefaultAlignTop = getContainerListAlignTop();
+        }
+
+        int compactTop = (int) (getResources().getDisplayMetrics().density * 32);
+        setContainerListAlignTop(hide ? Math.min(compactTop, mDefaultAlignTop) : mDefaultAlignTop);
     }
 
     /**

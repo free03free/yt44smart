@@ -7,8 +7,14 @@ import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.SystemClock;
 import android.view.Gravity;
+import android.graphics.Outline;
 import android.view.KeyEvent;
+import android.view.LayoutInflater;
 import android.view.View;
+import android.view.ViewOutlineProvider;
+import androidx.fragment.app.Fragment;
+import androidx.fragment.app.FragmentActivity;
+import com.liskovsoft.smartyoutubetv2.tv.ui.browse.BrowseFragment;
 import android.view.ViewParent;
 import android.view.ViewTreeObserver;
 import android.view.ViewGroup;
@@ -84,6 +90,8 @@ public final class MiniPlayerManager {
             this.bottomMargin = bottomMargin;
         }
     }
+    // Window is being recreated: don't flash the top bar back
+    private static boolean sRecreating;
     private static int sPosition = MiniPlayerData.POSITION_BOTTOM_RIGHT;
     private static WeakReference<View> sPrevFocus;
     private static WeakReference<View> sPendingFocus;
@@ -510,7 +518,12 @@ public final class MiniPlayerManager {
             return;
         }
 
-        destroyView();
+        sRecreating = true;
+        try {
+            destroyView();
+        } finally {
+            sRecreating = false;
+        }
 
         MiniPlayerData data = MiniPlayerData.instance(activity);
 
@@ -519,8 +532,25 @@ public final class MiniPlayerManager {
         int height = width * 9 / 16;
         int margin = (int) (activity.getResources().getDisplayMetrics().density * 24);
 
+        float density = activity.getResources().getDisplayMetrics().density;
+        final float radius = density * 14;
+        final int frame = Math.round(density * 3);
+
         FrameLayout container = new FrameLayout(activity);
-        container.setBackgroundColor(Color.BLACK);
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(0xFF121418);
+        background.setCornerRadius(radius);
+        background.setStroke(Math.max(1, Math.round(density * 1.5f)), 0x40FFFFFF);
+        container.setBackground(background);
+        container.setPadding(frame, frame, frame, frame);
+        container.setElevation(density * 12);
+        container.setClipToOutline(true);
+        container.setOutlineProvider(new ViewOutlineProvider() {
+            @Override
+            public void getOutline(View view, Outline outline) {
+                outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), radius);
+            }
+        });
         container.setFocusable(true);
         container.setFocusableInTouchMode(false);
         container.setClickable(true);
@@ -528,7 +558,7 @@ public final class MiniPlayerManager {
         container.setOnClickListener(v -> expand());
         container.setOnFocusChangeListener((v, hasFocus) -> onWindowFocusChanged(v, hasFocus));
 
-        EmbedPlayerView playerView = new EmbedPlayerView(activity);
+        EmbedPlayerView playerView = inflatePlayerView(activity);
         playerView.setQuality(EmbedPlayerView.QUALITY_NORMAL);
         playerView.setVideoFormat(getVideoFormat(data.getQuality()));
         playerView.setUseController(false);
@@ -548,8 +578,9 @@ public final class MiniPlayerManager {
         lp.setMargins(margin, margin, margin, margin);
         root.addView(container, lp);
 
-        // Keep the rows out of the window: the content ends above the window (or starts below it)
-        shiftContent(root, container, height + margin * 2, isBottomPosition(data.getPosition()));
+        // Keep the rows out of the window: the rows end above the window (or start below it). The side menu keeps its full height.
+        int gap = (int) (activity.getResources().getDisplayMetrics().density * 12);
+        shiftContent(root, container, height + margin + gap, isBottomPosition(data.getPosition()));
 
         sHost = activity;
         sContainer = container;
@@ -559,6 +590,7 @@ public final class MiniPlayerManager {
         sPendingFocus = null;
         sFocusRoot = root;
         root.getViewTreeObserver().addOnGlobalFocusChangeListener(sFocusListener);
+        applyTopBar(activity, true);
 
         Video video = Video.from(sVideo);
         video.pendingPosMs = sPositionMs;
@@ -569,6 +601,20 @@ public final class MiniPlayerManager {
             Log.e(TAG, "Mini player failed to start: %s", e.getMessage());
             dismiss();
         }
+    }
+
+    private static EmbedPlayerView inflatePlayerView(Activity activity) {
+        try {
+            View view = LayoutInflater.from(activity).inflate(com.liskovsoft.smartyoutubetv2.tv.R.layout.mini_player_video, null);
+
+            if (view instanceof EmbedPlayerView) {
+                return (EmbedPlayerView) view;
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Can't inflate the mini player view: %s", e.getMessage());
+        }
+
+        return new EmbedPlayerView(activity);
     }
 
     private static ProgressBar createSpinner(Activity activity, int windowHeight) {
@@ -597,10 +643,31 @@ public final class MiniPlayerManager {
     private static void shiftContent(ViewGroup root, View window, int reservedPx, boolean atBottom) {
         restoreContent();
 
-        for (int i = 0; i < root.getChildCount(); i++) {
-            View child = root.getChildAt(i);
+        List<View> targets = new ArrayList<>();
+        View rows = root.findViewById(androidx.leanback.R.id.browse_container_dock);
 
-            if (child == window || !(child.getLayoutParams() instanceof ViewGroup.MarginLayoutParams)) {
+        if (rows != null) {
+            // Browse screen: move only the rows (and the top bar when the window is on top). The side menu is not squeezed.
+            targets.add(rows);
+
+            if (!atBottom) {
+                View title = root.findViewById(com.liskovsoft.smartyoutubetv2.tv.R.id.browse_title_group);
+                if (title != null && title.getVisibility() != View.GONE) {
+                    targets.add(title);
+                }
+            }
+        } else {
+            // Other screens: move everything
+            for (int i = 0; i < root.getChildCount(); i++) {
+                View child = root.getChildAt(i);
+                if (child != window) {
+                    targets.add(child);
+                }
+            }
+        }
+
+        for (View child : targets) {
+            if (!(child.getLayoutParams() instanceof ViewGroup.MarginLayoutParams)) {
                 continue;
             }
 
@@ -614,6 +681,26 @@ public final class MiniPlayerManager {
             }
 
             child.setLayoutParams(params);
+        }
+    }
+
+    /**
+     * Tells the browse screen that the mini window appeared/disappeared (the top bar may need to hide/show).
+     */
+    private static void applyTopBar(Activity activity, boolean miniVisible) {
+        if (!(activity instanceof FragmentActivity)) {
+            return;
+        }
+
+        try {
+            Fragment fragment = ((FragmentActivity) activity).getSupportFragmentManager()
+                    .findFragmentById(com.liskovsoft.smartyoutubetv2.tv.R.id.main_frame);
+
+            if (fragment instanceof BrowseFragment) {
+                ((BrowseFragment) fragment).applyTopBarMode(miniVisible);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Can't update the top bar: %s", e.getMessage());
         }
     }
 
@@ -637,7 +724,8 @@ public final class MiniPlayerManager {
             GradientDrawable border = new GradientDrawable();
             border.setColor(Color.TRANSPARENT);
             float density = view.getResources().getDisplayMetrics().density;
-            border.setStroke((int) (density * 6), Color.WHITE);
+            border.setCornerRadius(density * 14);
+            border.setStroke((int) (density * 4), Color.WHITE);
             ((FrameLayout) view).setForeground(border);
             view.animate().scaleX(1.06f).scaleY(1.06f).setDuration(120).start();
         } else {
@@ -676,6 +764,10 @@ public final class MiniPlayerManager {
         }
 
         restoreContent();
+
+        if (sHost != null && !sRecreating) {
+            applyTopBar(sHost, false);
+        }
 
         if (sContainer != null) {
             ViewGroup parent = (ViewGroup) sContainer.getParent();

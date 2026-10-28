@@ -915,6 +915,10 @@
     <string name="mini_player_pos_top_right">أعلى اليمين</string>
     <string name="mini_player_pos_top_left">أعلى اليسار</string>
     <string name="mini_player_size">حجم المشغّل المصغّر (٪ من عرض الشاشة)</string>
+    <string name="mini_player_top_bar">الشريط العلوي (الشعار والساعة والبحث والحساب)</string>
+    <string name="mini_player_top_bar_show">إظهار دائماً</string>
+    <string name="mini_player_top_bar_hide_with_mini">إخفاء أثناء ظهور النافذة المصغّرة</string>
+    <string name="mini_player_top_bar_hide_always">إخفاء دائماً (مساحة أكبر للصفوف)</string>
     <string name="mini_player_quality">جودة المشغّل المصغّر (الأعلى تستهلك إنترنت ومعالجاً أكثر)</string>
     <string name="loading_spinner_title">شكل إشارة التحميل</string>
     <string name="loading_spinner_style_0">الافتراضي</string>

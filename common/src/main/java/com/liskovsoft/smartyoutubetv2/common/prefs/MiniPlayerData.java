@@ -12,6 +12,11 @@ public class MiniPlayerData {
     public static final int POSITION_TOP_RIGHT = 2;
     public static final int POSITION_TOP_LEFT = 3;
 
+    // Top bar = logo/clock + search + account buttons
+    public static final int TOP_BAR_SHOW = 0;
+    public static final int TOP_BAR_HIDE_WITH_MINI = 1; // hidden only while the mini window is visible
+    public static final int TOP_BAR_HIDE_ALWAYS = 2;
+
     public static final int MIN_SIZE_PERCENT = 10;
     public static final int MAX_SIZE_PERCENT = 60;
     public static final int SIZE_STEP_PERCENT = 2;
@@ -26,6 +31,7 @@ public class MiniPlayerData {
     private static final String KEY_SIZE_PERCENT = "size_percent";
     private static final String KEY_QUALITY = "quality";
     private static final String KEY_PLAY_IN_MINI = "play_in_mini";
+    private static final String KEY_TOP_BAR_MODE = "top_bar_mode";
 
     private static MiniPlayerData sInstance;
     private final SharedPreferences mPrefs;
@@ -59,6 +65,22 @@ public class MiniPlayerData {
 
     public void setPlayInMiniEnabled(boolean enabled) {
         mPrefs.edit().putBoolean(KEY_PLAY_IN_MINI, enabled).apply();
+    }
+
+    public int getTopBarMode() {
+        return mPrefs.getInt(KEY_TOP_BAR_MODE, TOP_BAR_SHOW);
+    }
+
+    public void setTopBarMode(int mode) {
+        mPrefs.edit().putInt(KEY_TOP_BAR_MODE, mode).apply();
+    }
+
+    /**
+     * @param miniWindowVisible is the mini window currently shown over the browse screen
+     */
+    public boolean isTopBarHidden(boolean miniWindowVisible) {
+        int mode = getTopBarMode();
+        return mode == TOP_BAR_HIDE_ALWAYS || (mode == TOP_BAR_HIDE_WITH_MINI && miniWindowVisible);
     }
 
     public int getPosition() {
