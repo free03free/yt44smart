@@ -928,6 +928,8 @@
     <string name="backup_cat_account">حساب تسجيل الدخول وبيانات خدمة يوتيوب</string>
     <string name="backup_cat_library">المكتبة (القوائم والمجموعات المحفوظة)</string>
     <string name="backup_cat_none">اختر قسمًا واحدًا على الأقل</string>
+    <string name="backup_start">ابدأ النسخ الاحتياطي للأقسام المحددة</string>
+    <string name="restore_start">ابدأ استعادة الأقسام المحددة</string>
     <string name="section_cache_custom_current">مخصص: %1$s</string>
     <string name="section_cache_custom_minutes_prompt">الدقائق (من 1 إلى 10080 = 7 أيام)</string>
     <string name="section_cache_custom_count_prompt">عدد الأقسام (من 1 إلى 200)</string>

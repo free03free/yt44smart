@@ -936,6 +936,8 @@
     <string name="backup_cat_account">Sign-in account and YouTube service data</string>
     <string name="backup_cat_library">Library (saved playlists and collections)</string>
     <string name="backup_cat_none">Choose at least one section</string>
+    <string name="backup_start">Start backup of the selected sections</string>
+    <string name="restore_start">Start restore of the selected sections</string>
     <string name="section_cache_custom_current">Custom: %1$s</string>
     <string name="section_cache_custom_minutes_prompt">Minutes (1 to 10080 = 7 days)</string>
     <string name="section_cache_custom_count_prompt">Number of sections (1 to 200)</string>
