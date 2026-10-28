@@ -13,6 +13,8 @@ import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 
+import androidx.recyclerview.widget.RecyclerView;
+
 import java.lang.ref.WeakReference;
 
 import com.liskovsoft.sharedutils.mylogger.Log;
@@ -133,6 +135,22 @@ public final class MiniPlayerManager {
             return true;
         }
 
+        // The user is on the last/first row and presses the arrow towards the window's corner.
+        // The window becomes the next item (before the search/account buttons of the top bar).
+        if (sContainer != null && !sContainer.hasFocus() && event.getAction() == KeyEvent.ACTION_DOWN &&
+                event.getRepeatCount() == 0 &&
+                keyCode == (isBottom() ? KeyEvent.KEYCODE_DPAD_DOWN : KeyEvent.KEYCODE_DPAD_UP)) {
+            View focus = activity.getCurrentFocus();
+
+            if (focus != null && isContentEdge(focus, keyCode)) {
+                Utils.removeCallbacks(sJumpRunnable);
+                sPendingFocus = null;
+                sPrevFocus = new WeakReference<>(focus);
+                sContainer.requestFocus();
+                return true;
+            }
+        }
+
         if (keyCode == KeyEvent.KEYCODE_MEDIA_STOP) {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
                 dismiss();
@@ -212,6 +230,44 @@ public final class MiniPlayerManager {
         sContainer.requestFocus();
     }
 
+    /**
+     * @return true when there are no more rows of the list in the key's direction (the system would
+     * move the focus out of the list: to the top bar buttons, etc.)
+     */
+    private static boolean isContentEdge(View view, int keyCode) {
+        RecyclerView outerList = null;
+        ViewParent parent = view.getParent();
+
+        while (parent instanceof View) {
+            if (parent instanceof RecyclerView) {
+                outerList = (RecyclerView) parent;
+            }
+            parent = parent.getParent();
+        }
+
+        if (outerList == null) {
+            return false; // unknown layout. Use the delayed check instead
+        }
+
+        View next = view.focusSearch(keyCode == KeyEvent.KEYCODE_DPAD_UP ? View.FOCUS_UP : View.FOCUS_DOWN);
+
+        if (next == null || next == sContainer) {
+            return true;
+        }
+
+        // Next item is inside the same list: another row. Not the edge
+        ViewParent nextParent = next.getParent();
+
+        while (nextParent != null) {
+            if (nextParent == outerList) {
+                return false;
+            }
+            nextParent = nextParent.getParent();
+        }
+
+        return true;
+    }
+
     private static boolean canContentScroll(View view, int keyCode) {
         boolean vertical = keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_DOWN;
         int direction = (keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_LEFT) ? -1 : 1;
@@ -255,12 +311,29 @@ public final class MiniPlayerManager {
                 boolean towardsCorner = keyCode == (isBottom() ? KeyEvent.KEYCODE_DPAD_DOWN : KeyEvent.KEYCODE_DPAD_UP) ||
                         keyCode == (isRight() ? KeyEvent.KEYCODE_DPAD_RIGHT : KeyEvent.KEYCODE_DPAD_LEFT);
                 if (isDown && !towardsCorner) {
-                    returnFocus();
+                    boolean isSideKey = keyCode == KeyEvent.KEYCODE_DPAD_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT;
+
+                    if (!isSideKey || !moveFocusBySystem(keyCode)) {
+                        returnFocus();
+                    }
                 }
                 return true; // the window is in the corner: nowhere to go
             default:
                 return false;
         }
+    }
+
+    /**
+     * Moves the focus from the window to its neighbour on the same band (e.g. account/search buttons of the top bar).
+     */
+    private static boolean moveFocusBySystem(int keyCode) {
+        if (sContainer == null) {
+            return false;
+        }
+
+        View next = sContainer.focusSearch(keyCode == KeyEvent.KEYCODE_DPAD_LEFT ? View.FOCUS_LEFT : View.FOCUS_RIGHT);
+
+        return next != null && next != sContainer && next.requestFocus();
     }
 
     private static void returnFocus() {
