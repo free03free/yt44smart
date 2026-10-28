@@ -1,6 +1,10 @@
 package com.liskovsoft.smartyoutubetv2.tv.ui.main;
 
+import android.app.Activity;
+import android.app.Application;
+import android.content.ComponentCallbacks2;
 import android.os.Build.VERSION;
+import android.os.Bundle;
 
 import androidx.annotation.NonNull;
 import androidx.multidex.MultiDexApplication;
@@ -22,6 +26,7 @@ import com.liskovsoft.smartyoutubetv2.common.app.views.SplashView;
 import com.liskovsoft.smartyoutubetv2.common.app.views.ViewManager;
 import com.liskovsoft.smartyoutubetv2.common.app.views.WebBrowserView;
 import com.liskovsoft.smartyoutubetv2.common.prefs.NetworkData;
+import com.liskovsoft.smartyoutubetv2.common.prefs.PrefetchData;
 import com.liskovsoft.smartyoutubetv2.common.prefs.PlayerData;
 import com.liskovsoft.smartyoutubetv2.common.prefs.PlayerTweaksData;
 import com.liskovsoft.smartyoutubetv2.tv.ui.adddevice.AddDeviceActivity;
@@ -85,6 +90,65 @@ public class MainApplication extends MultiDexApplication implements Configuratio
 
         setupGlobalExceptionHandler();
         setupViewManager();
+        setupSectionRefresh();
+    }
+
+    // Short absences (rotation, a system dialog, a quick app switch) are not a new entry
+    private static final long REENTER_GRACE_MS = 10_000;
+    private int mStartedActivities;
+    private long mWentBackgroundMs;
+
+    /**
+     * Like YouTube: when the user comes back to the app, the kept sections are dropped and the current one is reloaded.
+     */
+    private void setupSectionRefresh() {
+        registerActivityLifecycleCallbacks(new Application.ActivityLifecycleCallbacks() {
+            @Override
+            public void onActivityStarted(Activity activity) {
+                if (mStartedActivities == 0 && mWentBackgroundMs > 0
+                        && System.currentTimeMillis() - mWentBackgroundMs >= REENTER_GRACE_MS
+                        && PrefetchData.instance(MainApplication.this).isRefreshOnEnterEnabled()) {
+                    BrowsePresenter.onAppReentered();
+                }
+
+                mStartedActivities++;
+            }
+
+            @Override
+            public void onActivityStopped(Activity activity) {
+                mStartedActivities = Math.max(0, mStartedActivities - 1);
+
+                if (mStartedActivities == 0) {
+                    mWentBackgroundMs = System.currentTimeMillis();
+                }
+            }
+
+            @Override public void onActivityCreated(Activity activity, Bundle savedInstanceState) {}
+            @Override public void onActivityResumed(Activity activity) {}
+            @Override public void onActivityPaused(Activity activity) {}
+            @Override public void onActivitySaveInstanceState(Activity activity, Bundle outState) {}
+            @Override public void onActivityDestroyed(Activity activity) {}
+        });
+    }
+
+    /**
+     * Protects the kept sections from running the device out of memory.
+     */
+    @Override
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND || level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
+            BrowsePresenter.trimSectionCache(true);
+        } else if (level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            BrowsePresenter.trimSectionCache(false);
+        }
+    }
+
+    @Override
+    public void onLowMemory() {
+        super.onLowMemory();
+        BrowsePresenter.trimSectionCache(true);
     }
 
     /**

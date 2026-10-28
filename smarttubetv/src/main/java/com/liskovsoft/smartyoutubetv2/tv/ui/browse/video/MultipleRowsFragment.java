@@ -22,6 +22,7 @@ import com.liskovsoft.smartyoutubetv2.common.app.models.data.Video;
 import com.liskovsoft.smartyoutubetv2.common.app.models.data.VideoGroup;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.interfaces.VideoGroupPresenter;
 import com.liskovsoft.smartyoutubetv2.common.prefs.MainUIData;
+import com.liskovsoft.smartyoutubetv2.common.prefs.PrefetchData;
 import com.liskovsoft.smartyoutubetv2.tv.adapter.VideoGroupObjectAdapter;
 import com.liskovsoft.smartyoutubetv2.tv.presenter.ChannelHeaderPresenter;
 import com.liskovsoft.smartyoutubetv2.tv.presenter.ChannelHeaderPresenter.ChannelHeaderCallback;
@@ -368,7 +369,7 @@ public abstract class MultipleRowsFragment extends RowsSupportFragment implement
 
                 if (index != -1) {
                     int size = adapter.size();
-                    if (index > (size - ViewUtil.ROW_SCROLL_CONTINUE_NUM)) {
+                    if (index > (size - PrefetchData.instance(getContext()).getRowScrollNum(ViewUtil.ROW_SCROLL_CONTINUE_NUM))) {
                         mMainPresenter.onScrollEnd((Video) adapter.get(size - 1));
                     }
                     break;

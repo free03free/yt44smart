@@ -27,6 +27,7 @@ import com.liskovsoft.smartyoutubetv2.common.app.presenters.ChannelUploadsPresen
 import com.liskovsoft.smartyoutubetv2.common.prefs.AccountsData;
 import com.liskovsoft.smartyoutubetv2.common.prefs.AppPrefs;
 import com.liskovsoft.smartyoutubetv2.common.prefs.MainUIData;
+import com.liskovsoft.smartyoutubetv2.common.prefs.PrefetchData;
 import com.liskovsoft.smartyoutubetv2.common.utils.LoadingManager;
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
 import com.liskovsoft.youtubeapi.service.YouTubeServiceManager;
@@ -334,7 +335,10 @@ public class MediaServiceManager implements OnAccountChange {
         Pair<Integer, Long> sizeTimestamp = mContinuations.get(group.getId());
 
         long currentTimeMillis = System.currentTimeMillis();
-        if (sizeTimestamp != null && currentTimeMillis - sizeTimestamp.second > 3_000) { // seems that section is refreshed
+        PrefetchData prefetch = PrefetchData.instance(context);
+        // Prefetch makes several requests in a row. Give them more time before the group is treated as refreshed.
+        long refreshTimeoutMs = prefetch.isEnabled() ? 20_000 : 3_000;
+        if (sizeTimestamp != null && currentTimeMillis - sizeTimestamp.second > refreshTimeoutMs) { // seems that section is refreshed
             sizeTimestamp = null;
         }
 
@@ -348,6 +352,10 @@ public class MediaServiceManager implements OnAccountChange {
         int minScaledSize = isGrid ? MIN_SCALED_GRID_GROUP_SIZE : MIN_SCALED_ROW_GROUP_SIZE;
         int minSize = isGrid ? MIN_GRID_GROUP_SIZE : MIN_ROW_GROUP_SIZE;
         boolean groupTooSmall = isScaledUIEnabled ? totalSize < minScaledSize : totalSize < minSize;
+
+        if (prefetch.isEnabled() && !groupTooSmall) {
+            groupTooSmall = totalSize < (isGrid ? prefetch.getGridTarget() : prefetch.getRowTarget());
+        }
 
         mContinuations.put(group.getId(), new Pair<>(groupTooSmall ? totalSize : 0, currentTimeMillis));
 

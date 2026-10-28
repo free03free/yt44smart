@@ -40,6 +40,7 @@ import com.liskovsoft.smartyoutubetv2.common.misc.AppDataSourceManager;
 import com.liskovsoft.smartyoutubetv2.common.misc.BrowseProcessorManager;
 import com.liskovsoft.smartyoutubetv2.common.misc.MediaServiceManager;
 import com.liskovsoft.smartyoutubetv2.common.misc.MediaServiceManager.AccountChangeListener;
+import com.liskovsoft.smartyoutubetv2.common.prefs.PrefetchData;
 import com.liskovsoft.smartyoutubetv2.common.prefs.AccountsData;
 import com.liskovsoft.smartyoutubetv2.common.prefs.BlockedChannelData;
 import com.liskovsoft.smartyoutubetv2.common.prefs.MainUIData;
@@ -114,6 +115,47 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
         sInstance = null;
     }
 
+    /**
+     * The user came back to the app after being away: drop the kept sections and reload the current one on resume.
+     */
+    public static void onAppReentered() {
+        BrowsePresenter presenter = sInstance;
+
+        if (presenter == null) {
+            return;
+        }
+
+        presenter.mSectionCache.clear();
+        presenter.mRefreshOnResume = true;
+    }
+
+    /**
+     * Called when the system is short of memory.
+     * @param all true - drop everything, false - keep only the most recently used half
+     */
+    public static void trimSectionCache(boolean all) {
+        BrowsePresenter presenter = sInstance;
+
+        if (presenter == null) {
+            return;
+        }
+
+        if (all) {
+            presenter.mSectionCache.clear();
+            return;
+        }
+
+        int remove = presenter.mSectionCache.size() / 2;
+        java.util.Iterator<CachedSection> it = presenter.mSectionCache.values().iterator();
+
+        while (remove-- > 0 && it.hasNext()) {
+            it.next();
+            it.remove();
+        }
+    }
+
+    private boolean mRefreshOnResume;
+
     @Override
     public void onViewInitialized() {
         super.onViewInitialized();
@@ -123,6 +165,7 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
         }
 
         updateSections();
+        mRefreshOnResume = false; // the sections are already loaded from scratch
 
         // Move default focus
         int selectedSectionIndex = findSectionIndex(mCurrentSection != null ? mCurrentSection.getId() : mBootstrapSectionId);
@@ -140,6 +183,15 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
     @Override
     public void onViewResumed() {
         super.onViewResumed();
+
+        if (mRefreshOnResume && getView() != null) {
+            mRefreshOnResume = false;
+
+            if (PrefetchData.instance(getContext()).isRefreshOnEnterEnabled()) {
+                refresh(false);
+                return;
+            }
+        }
 
         refreshIfNeeded();
     }
@@ -290,6 +342,8 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
     }
 
     public void updateSections() {
+        mSectionCache.clear();
+
         if (getView() == null) {
             return;
         }
@@ -493,7 +547,8 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
 
         VideoGroup group = item.getGroup();
 
-        continueGroup(group);
+        // Prefetch on: load the next page silently (no spinner)
+        continueGroup(group, !PrefetchData.instance(getContext()).isEnabled());
     }
 
     @Override
@@ -501,7 +556,7 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
         saveSelectedItems(); // save previous state
         mCurrentSection = findSectionById(sectionId);
         mCurrentVideo = null; // fast scroll through the sections (fix empty selected item)
-        updateCurrentSection();
+        updateCurrentSection(true);
         restoreSelectedItems(); // Don't place anywhere else
     }
 
@@ -646,11 +701,174 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
         }
     }
 
+    // --- Loaded sections are kept in memory: going back to a section shows its videos at once, without a new request.
+
+    private static final class CachedSection {
+        final long time = System.currentTimeMillis();
+        final List<VideoGroup> groups = new ArrayList<>();
+    }
+
+    private final Map<Integer, CachedSection> mSectionCache = new java.util.LinkedHashMap<>();
+
+    private boolean isCacheable(BrowseSection section) {
+        if (section == null || section.getId() == MediaGroup.TYPE_HISTORY) { // history changes after every video
+            return false;
+        }
+
+        int type = section.getType();
+
+        if (type == BrowseSection.TYPE_ROW) {
+            return true;
+        }
+
+        return (type == BrowseSection.TYPE_GRID || type == BrowseSection.TYPE_SHORTS_GRID) && mGridMapping.containsKey(section.getId());
+    }
+
+    /**
+     * Sends the group to the view and remembers it for the next visit of the section.
+     */
+    private void showGroup(VideoGroup group) {
+        getView().updateSection(group);
+
+        BrowseSection section = group.getSection();
+
+        if (section == null || !isCacheable(section)) {
+            return;
+        }
+
+        if (PrefetchData.instance(getContext()).getSectionCacheMinutes() == 0) { // cache is off: don't hold anything
+            mSectionCache.clear();
+            return;
+        }
+
+        if (group.getAction() == VideoGroup.ACTION_REPLACE && group.getPosition() == -1) {
+            mSectionCache.remove(section.getId());
+            mSectionCache.put(section.getId(), new CachedSection());
+        }
+
+        CachedSection cached = mSectionCache.get(section.getId());
+
+        if (cached == null) {
+            return;
+        }
+
+        // Continuation pages are appended to the same VideoGroup object (it already holds all loaded videos).
+        // Keep every object once, otherwise the videos would be doubled on replay.
+        for (VideoGroup known : cached.groups) {
+            if (known == group) {
+                trimSectionCache(); // the group grew with the continuation page
+                return;
+            }
+        }
+
+        cached.groups.add(group);
+        trimSectionCache();
+    }
+
+    /**
+     * Keeps the cache safe for heavy use. Order: the least recently used sections go first.
+     * 1) expired sections, 2) the user's limit of sections, 3) the memory budget (total videos).
+     */
+    private void trimSectionCache() {
+        PrefetchData data = PrefetchData.instance(getContext());
+        int minutes = data.getSectionCacheMinutes();
+        int maxSections = data.getSectionCacheSections();
+        int maxVideos = data.getMaxCachedVideos();
+
+        if (minutes > 0) {
+            long now = System.currentTimeMillis();
+            java.util.Iterator<CachedSection> it = mSectionCache.values().iterator();
+
+            while (it.hasNext()) {
+                if (now - it.next().time > minutes * 60_000L) {
+                    it.remove();
+                }
+            }
+        }
+
+        while (maxSections > 0 && mSectionCache.size() > maxSections) {
+            mSectionCache.remove(mSectionCache.keySet().iterator().next());
+        }
+
+        int total = 0;
+
+        for (CachedSection cached : mSectionCache.values()) {
+            total += countVideos(cached);
+        }
+
+        java.util.Iterator<CachedSection> it = mSectionCache.values().iterator();
+
+        while (total > maxVideos && mSectionCache.size() > 1 && it.hasNext()) { // never drop the section just shown
+            total -= countVideos(it.next());
+            it.remove();
+        }
+    }
+
+    private int countVideos(CachedSection cached) {
+        int count = 0;
+
+        for (VideoGroup group : cached.groups) {
+            if (group.getVideos() != null) {
+                count += group.getVideos().size();
+            }
+        }
+
+        return count;
+    }
+
+    private boolean showCachedSection(BrowseSection section) {
+        int minutes = PrefetchData.instance(getContext()).getSectionCacheMinutes();
+        CachedSection cached = mSectionCache.get(section.getId());
+
+        // minutes: 0 = off, negative = never expires
+        if (cached == null || minutes == 0 || (minutes > 0 && System.currentTimeMillis() - cached.time > minutes * 60_000L)) {
+            mSectionCache.remove(section.getId());
+            return false;
+        }
+
+        boolean hasContent = false;
+
+        for (VideoGroup group : cached.groups) {
+            if (!group.isEmpty()) {
+                hasContent = true;
+                break;
+            }
+        }
+
+        if (!hasContent) {
+            mSectionCache.remove(section.getId());
+            return false;
+        }
+
+        // most recently used goes to the end, so the least used one is dropped first
+        mSectionCache.remove(section.getId());
+        mSectionCache.put(section.getId(), cached);
+
+        Log.d(TAG, "Show section from the cache: %s", section.getTitle());
+
+        disposeActions(); // stop loading of the previous section
+        getView().showProgressBar(false);
+
+        for (VideoGroup group : new ArrayList<>(cached.groups)) {
+            getView().updateSection(group);
+        }
+
+        return true;
+    }
+
     private void updateRefreshTime() {
         mLastUpdateTimeMs = System.currentTimeMillis();
     }
 
     private void updateCurrentSection() {
+        updateCurrentSection(false);
+    }
+
+    private void updateCurrentSection(boolean useCache) {
+        if (useCache && getView() != null && mCurrentSection != null && showCachedSection(mCurrentSection)) {
+            return;
+        }
+
         disposeActions();
 
         if (getView() == null || mCurrentSection == null) {
@@ -738,7 +956,7 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
 
         VideoGroup firstGroup = VideoGroup.from(section);
         firstGroup.setAction(VideoGroup.ACTION_REPLACE);
-        getView().updateSection(firstGroup);
+        showGroup(firstGroup);
 
         if (groups == null) {
             // No group. Maybe just clear.
@@ -767,7 +985,7 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
                                     videoGroup.setTitle(getContext().getString(R.string.suggestions));
                                 }
 
-                                getView().updateSection(videoGroup);
+                                showGroup(videoGroup);
                                 mBrowseProcessor.process(videoGroup);
 
                                 continueGroupIfNeeded(videoGroup, false);
@@ -797,7 +1015,7 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
         // Stay on the same group in case of multiple subscribe calls
         VideoGroup baseGroup = VideoGroup.from(section, column);
         baseGroup.setAction(VideoGroup.ACTION_REPLACE);
-        getView().updateSection(baseGroup);
+        showGroup(baseGroup);
 
         if (group == null) {
             // No group. Maybe just clear.
@@ -818,7 +1036,7 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
 
                             VideoGroup videoGroup = VideoGroup.from(baseGroup, mediaGroup);
                             appendLocalHistory(videoGroup);
-                            getView().updateSection(videoGroup);
+                            showGroup(videoGroup);
                             mBrowseProcessor.process(videoGroup);
 
                             continueGroupIfNeeded(videoGroup);
@@ -851,6 +1069,13 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
             return;
         }
 
+        // The same page must not be requested twice at once (the next-page key is shared)
+        final int groupId = group.getId();
+        if (!mContinuingGroups.add(groupId)) {
+            Log.d(TAG, "continueGroup: already loading group: " + group.getTitle());
+            return;
+        }
+
         Log.d(TAG, "continueGroup: start continue group: " + group.getTitle());
 
         // Small amount of items == small load time. Loading bar are useless?
@@ -873,21 +1098,29 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
         Disposable continueAction = continuation
                 .subscribe(
                         continueGroup -> {
+                            mContinuingGroups.remove(groupId);
+
+                            if (getView() == null) {
+                                return;
+                            }
+
                             getView().showProgressBar(false);
 
                             VideoGroup videoGroup = VideoGroup.from(group, continueGroup);
-                            getView().updateSection(videoGroup);
+                            showGroup(videoGroup);
                             mBrowseProcessor.process(videoGroup);
 
                             continueGroupIfNeeded(videoGroup, showLoading);
                         },
                         error -> {
+                            mContinuingGroups.remove(groupId);
                             Log.e(TAG, "continueGroup error: %s", error.getMessage());
                             if (getView() != null) {
                                 getView().showProgressBar(false);
                             }
                         },
                         () -> {
+                            mContinuingGroups.remove(groupId);
                             if (getView() != null) {
                                 getView().showProgressBar(false);
                             }
@@ -936,7 +1169,10 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
         }
     }
 
+    private final java.util.Set<Integer> mContinuingGroups = new java.util.HashSet<>();
+
     private void disposeActions() {
+        mContinuingGroups.clear();
         RxHelper.disposeActions(mActions);
         Utils.removeCallbacks(mRefreshSection);
         mLastUpdateTimeMs = -1;

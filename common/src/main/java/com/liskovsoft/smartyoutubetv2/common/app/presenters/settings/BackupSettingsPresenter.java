@@ -189,10 +189,12 @@ public class BackupSettingsPresenter extends BasePresenter<Void> {
                     String.format("%s:\n%s", getContext().getString(R.string.app_backup), backupPath),
                 hasFullStorageAccess ? null : getContext().getString(R.string.app_backup_desc),
                 option -> {
-                    AppDialogUtil.showConfirmationDialog(getContext(), getContext().getString(R.string.app_backup), () -> {
-                        mSidebarService.enableSection(MediaGroup.TYPE_SETTINGS, true); // prevent Settings lock
-                        backupManager.checkPermAndBackup();
-                        MessageHelpers.showMessage(getContext(), R.string.msg_done);
+                    showCategoriesDialog(getContext().getString(R.string.app_backup), BackupAndRestoreManager.CAT_ALL, mask -> {
+                        AppDialogUtil.showConfirmationDialog(getContext(), getContext().getString(R.string.app_backup), () -> {
+                            mSidebarService.enableSection(MediaGroup.TYPE_SETTINGS, true); // prevent Settings lock
+                            backupManager.checkPermAndBackup(mask);
+                            MessageHelpers.showMessage(getContext(), R.string.msg_done);
+                        });
                     });
                 }));
 
@@ -209,6 +211,50 @@ public class BackupSettingsPresenter extends BasePresenter<Void> {
         settingsPresenter.appendSingleButton(AppDialogUtil.createSubscriptionsBackupButton(getContext()));
     }
 
+    private interface OnCategories {
+        void onChosen(int mask);
+    }
+
+    /**
+     * Lets the user pick which sections to back up / restore (only the ones in "available" are shown).
+     */
+    private void showCategoriesDialog(String actionTitle, int available, OnCategories onChosen) {
+        AppDialogPresenter dialog = AppDialogPresenter.instance(getContext());
+        final int[] mask = {available};
+        int[] categories = {BackupAndRestoreManager.CAT_SETTINGS, BackupAndRestoreManager.CAT_ACCOUNT, BackupAndRestoreManager.CAT_LIBRARY};
+        int[] titles = {R.string.backup_cat_settings, R.string.backup_cat_account, R.string.backup_cat_library};
+        List<OptionItem> options = new ArrayList<>();
+
+        for (int i = 0; i < categories.length; i++) {
+            final int category = categories[i];
+
+            if ((available & category) == 0) {
+                continue;
+            }
+
+            options.add(UiOptionItem.from(getContext().getString(titles[i]), option -> {
+                if (option.isSelected()) {
+                    mask[0] |= category;
+                } else {
+                    mask[0] &= ~category;
+                }
+            }, true));
+        }
+
+        dialog.appendCheckedCategory(getContext().getString(R.string.backup_choose_sections), options);
+
+        dialog.appendSingleButton(UiOptionItem.from(actionTitle, option -> {
+            if (mask[0] == 0) {
+                MessageHelpers.showMessage(getContext(), R.string.backup_cat_none);
+                return;
+            }
+
+            onChosen.onChosen(mask[0]);
+        }));
+
+        dialog.showDialog(actionTitle);
+    }
+
     private void showLocalRestoreDialog(BackupAndRestoreManager backupManager, List<String> backups) {
         if (backups != null && !backups.isEmpty()) {
             showLocalRestoreSelectorDialog(backups, backupManager);
@@ -223,8 +269,17 @@ public class BackupSettingsPresenter extends BasePresenter<Void> {
 
         for (String name : backups) {
             options.add(UiOptionItem.from(name, optionItem -> {
-                AppDialogUtil.showConfirmationDialog(getContext(), getContext().getString(R.string.app_restore), () -> {
-                    backupManager.checkPermAndRestore(name);
+                int available = backupManager.getAvailableCategories(name);
+
+                if (available == 0) {
+                    MessageHelpers.showLongMessage(getContext(), R.string.nothing_found);
+                    return;
+                }
+
+                showCategoriesDialog(getContext().getString(R.string.app_restore), available, mask -> {
+                    AppDialogUtil.showConfirmationDialog(getContext(), getContext().getString(R.string.app_restore), () -> {
+                        backupManager.checkPermAndRestore(name, mask);
+                    });
                 });
             }));
         }

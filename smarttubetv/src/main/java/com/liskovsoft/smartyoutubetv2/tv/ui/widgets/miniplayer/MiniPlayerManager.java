@@ -592,6 +592,20 @@ public final class MiniPlayerManager {
         root.getViewTreeObserver().addOnGlobalFocusChangeListener(sFocusListener);
         applyTopBar(activity, true);
 
+        if (!isBottomPosition(data.getPosition())) {
+            final int reserved = height + margin + gap;
+            final ViewGroup rootFinal = root;
+            final View windowFinal = container;
+            Runnable shiftTitle = () -> {
+                if (sContainer == windowFinal) {
+                    restoreTitleParts();
+                    shiftTitleParts(rootFinal, windowFinal, reserved);
+                }
+            };
+            root.post(shiftTitle);
+            root.postDelayed(shiftTitle, 400); // the top bar may be laid out later
+        }
+
         Video video = Video.from(sVideo);
         video.pendingPosMs = sPositionMs;
 
@@ -649,13 +663,6 @@ public final class MiniPlayerManager {
         if (rows != null) {
             // Browse screen: move only the rows (and the top bar when the window is on top). The side menu is not squeezed.
             targets.add(rows);
-
-            if (!atBottom) {
-                View title = root.findViewById(com.liskovsoft.smartyoutubetv2.tv.R.id.browse_title_group);
-                if (title != null && title.getVisibility() != View.GONE) {
-                    targets.add(title);
-                }
-            }
         } else {
             // Other screens: move everything
             for (int i = 0; i < root.getChildCount(); i++) {
@@ -684,6 +691,54 @@ public final class MiniPlayerManager {
         }
     }
 
+    // Parts of the top bar (logo+clock / buttons) that were moved down to stay clear of the window
+    private static final List<WeakReference<View>> sTitleShifted = new ArrayList<>();
+
+    /**
+     * Moves down only the top bar parts that are on the same side as the window (usually the logo and clock).
+     * The search/account buttons on the other side stay at the top, so they never cover the side menu.
+     */
+    private static void shiftTitleParts(ViewGroup root, View window, int reservedPx) {
+        View title = root.findViewById(com.liskovsoft.smartyoutubetv2.tv.R.id.browse_title_group);
+
+        if (!(title instanceof ViewGroup) || title.getVisibility() == View.GONE) {
+            return;
+        }
+
+        ViewGroup titleGroup = (ViewGroup) title;
+        int rootWidth = root.getWidth() > 0 ? root.getWidth() : root.getResources().getDisplayMetrics().widthPixels;
+        boolean windowOnRight = isRight();
+
+        for (int i = 0; i < titleGroup.getChildCount(); i++) {
+            View part = titleGroup.getChildAt(i);
+
+            if (part.getVisibility() == View.GONE || part.getWidth() <= 0) {
+                continue;
+            }
+
+            int[] loc = new int[2];
+            part.getLocationOnScreen(loc);
+            float centerX = loc[0] + part.getWidth() / 2f;
+            boolean partOnRight = centerX > rootWidth / 2f;
+
+            if (partOnRight == windowOnRight) {
+                part.setTranslationY(reservedPx);
+                sTitleShifted.add(new WeakReference<>(part));
+            }
+        }
+    }
+
+    private static void restoreTitleParts() {
+        for (WeakReference<View> ref : sTitleShifted) {
+            View part = ref.get();
+            if (part != null) {
+                part.setTranslationY(0);
+            }
+        }
+
+        sTitleShifted.clear();
+    }
+
     /**
      * Tells the browse screen that the mini window appeared/disappeared (the top bar may need to hide/show).
      */
@@ -705,6 +760,8 @@ public final class MiniPlayerManager {
     }
 
     private static void restoreContent() {
+        restoreTitleParts();
+
         for (ShiftedView shifted : sShiftedViews) {
             View view = shifted.view.get();
 

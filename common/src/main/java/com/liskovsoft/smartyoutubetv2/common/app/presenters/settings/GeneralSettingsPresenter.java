@@ -25,6 +25,7 @@ import com.liskovsoft.smartyoutubetv2.common.prefs.GeneralData;
 import com.liskovsoft.smartyoutubetv2.common.prefs.LoadingSpinnerData;
 import com.liskovsoft.smartyoutubetv2.common.prefs.MainUIData;
 import com.liskovsoft.smartyoutubetv2.common.prefs.MiniPlayerData;
+import com.liskovsoft.smartyoutubetv2.common.prefs.PrefetchData;
 import com.liskovsoft.smartyoutubetv2.common.prefs.NetworkData;
 import com.liskovsoft.smartyoutubetv2.common.prefs.PlayerData;
 import com.liskovsoft.smartyoutubetv2.common.prefs.PlayerTweaksData;
@@ -362,6 +363,27 @@ public class GeneralSettingsPresenter extends BasePresenter<Void> {
 
         settingsPresenter.appendRadioCategory(getContext().getString(R.string.mini_player_size), sizes);
 
+        PrefetchData prefetch = PrefetchData.instance(getContext());
+        List<OptionItem> prefetchOptions = new ArrayList<>();
+        int[] prefetchIds = {PrefetchData.MODE_OFF, PrefetchData.MODE_NORMAL, PrefetchData.MODE_MORE};
+        int[] prefetchTitles = {R.string.prefetch_off, R.string.prefetch_normal, R.string.prefetch_more};
+
+        for (int i = 0; i < prefetchIds.length; i++) {
+            int id = prefetchIds[i];
+            prefetchOptions.add(UiOptionItem.from(getContext().getString(prefetchTitles[i]),
+                    option -> prefetch.setMode(id), prefetch.getMode() == id));
+        }
+
+        settingsPresenter.appendRadioCategory(getContext().getString(R.string.prefetch_title), prefetchOptions);
+
+        appendCacheMinutes(settingsPresenter, prefetch);
+        appendCacheSections(settingsPresenter, prefetch);
+
+        settingsPresenter.appendSingleSwitch(UiOptionItem.from(
+                getContext().getString(R.string.refresh_on_enter_title),
+                option -> prefetch.setRefreshOnEnterEnabled(option.isSelected()),
+                prefetch.isRefreshOnEnterEnabled()));
+
         List<OptionItem> topBar = new ArrayList<>();
         int[] topBarIds = {MiniPlayerData.TOP_BAR_SHOW, MiniPlayerData.TOP_BAR_HIDE_WITH_MINI, MiniPlayerData.TOP_BAR_HIDE_ALWAYS};
         int[] topBarTitles = {R.string.mini_player_top_bar_show, R.string.mini_player_top_bar_hide_with_mini,
@@ -388,6 +410,111 @@ public class GeneralSettingsPresenter extends BasePresenter<Void> {
     /**
      * Style of the loading indicator (video loading, screens loading).
      */
+    private String cacheMinutesTitle(int minutes) {
+        if (minutes == 0) {
+            return getContext().getString(R.string.section_cache_off);
+        } else if (minutes < 0) {
+            return getContext().getString(R.string.section_cache_forever);
+        } else if (minutes >= 60 && minutes % 60 == 0) {
+            return getContext().getString(R.string.section_cache_hours, minutes / 60);
+        }
+
+        return getContext().getString(R.string.section_cache_minutes, minutes);
+    }
+
+    private void appendCacheMinutes(AppDialogPresenter dialog, PrefetchData prefetch) {
+        final int current = prefetch.getSectionCacheMinutes();
+        boolean isPreset = false;
+        List<OptionItem> options = new ArrayList<>();
+
+        for (int minutes : PrefetchData.CACHE_MINUTES) {
+            if (minutes == current) {
+                isPreset = true;
+            }
+
+            options.add(UiOptionItem.from(cacheMinutesTitle(minutes),
+                    option -> prefetch.setSectionCacheMinutes(minutes), minutes == current));
+        }
+
+        String customTitle = isPreset ? getContext().getString(R.string.library_custom)
+                : getContext().getString(R.string.section_cache_custom_current, cacheMinutesTitle(current));
+
+        options.add(UiOptionItem.from(customTitle, option -> {
+            dialog.closeDialog();
+            SimpleEditDialog.show(getContext(), getContext().getString(R.string.section_cache_title),
+                    getContext().getString(R.string.section_cache_custom_minutes_prompt),
+                    current > 0 ? String.valueOf(current) : "", value -> {
+                        int number = parseInRange(value, PrefetchData.MAX_CACHE_MINUTES);
+
+                        if (number <= 0) {
+                            MessageHelpers.showMessage(getContext(), getContext().getString(R.string.section_cache_invalid_minutes));
+                            return false;
+                        }
+
+                        prefetch.setSectionCacheMinutes(number);
+                        show();
+                        return true;
+                    });
+        }, !isPreset));
+
+        dialog.appendRadioCategory(getContext().getString(R.string.section_cache_title), options);
+    }
+
+    private void appendCacheSections(AppDialogPresenter dialog, PrefetchData prefetch) {
+        final int current = prefetch.getSectionCacheSections();
+        boolean isPreset = false;
+        List<OptionItem> options = new ArrayList<>();
+
+        for (int count : PrefetchData.CACHE_SECTIONS) {
+            if (count == current) {
+                isPreset = true;
+            }
+
+            String title = count == 0 ? getContext().getString(R.string.section_cache_unlimited)
+                    : getContext().getString(R.string.section_cache_count, count);
+            options.add(UiOptionItem.from(title,
+                    option -> prefetch.setSectionCacheSections(count), count == current));
+        }
+
+        String customTitle = isPreset ? getContext().getString(R.string.library_custom)
+                : getContext().getString(R.string.section_cache_custom_current,
+                        getContext().getString(R.string.section_cache_count, current));
+
+        options.add(UiOptionItem.from(customTitle, option -> {
+            dialog.closeDialog();
+            SimpleEditDialog.show(getContext(), getContext().getString(R.string.section_cache_count_title),
+                    getContext().getString(R.string.section_cache_custom_count_prompt),
+                    current > 0 ? String.valueOf(current) : "", value -> {
+                        int number = parseInRange(value, PrefetchData.MAX_CACHE_SECTIONS);
+
+                        if (number <= 0) {
+                            MessageHelpers.showMessage(getContext(), getContext().getString(R.string.section_cache_invalid_count));
+                            return false;
+                        }
+
+                        prefetch.setSectionCacheSections(number);
+                        show();
+                        return true;
+                    });
+        }, !isPreset));
+
+        dialog.appendRadioCategory(getContext().getString(R.string.section_cache_count_title), options);
+    }
+
+    /** @return the number or -1 when it is not a whole number in 1..max */
+    private static int parseInRange(String value, int max) {
+        if (value == null) {
+            return -1;
+        }
+
+        try {
+            long number = Long.parseLong(value.trim());
+            return (number <= 0 || number > max) ? -1 : (int) number;
+        } catch (NumberFormatException ex) {
+            return -1;
+        }
+    }
+
     private void appendLoadingSpinnerCategory(AppDialogPresenter settingsPresenter) {
         LoadingSpinnerData data = LoadingSpinnerData.instance(getContext());
 

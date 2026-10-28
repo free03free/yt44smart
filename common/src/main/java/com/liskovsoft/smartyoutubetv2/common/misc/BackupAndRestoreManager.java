@@ -31,6 +31,11 @@ public class BackupAndRestoreManager implements MotherActivity.OnPermissions {
     private final Context mContext;
     private static final String SHARED_PREFS_SUBDIR = "shared_prefs";
     private static final String FILES_SUBDIR = "files";
+    /** Backup sections. Each section is stored in its own files, so it can be saved/restored alone. */
+    public static final int CAT_SETTINGS = 1; // app settings + local data (history, sidebar...)
+    public static final int CAT_ACCOUNT = 2;  // sign-in / YouTube service data
+    public static final int CAT_LIBRARY = 4;  // saved playlists / collections of the library
+    public static final int CAT_ALL = CAT_SETTINGS | CAT_ACCOUNT | CAT_LIBRARY;
     private final File mSharedPrefsDir;
     private final File mFilesDir;
     private final List<File> mBackupDirs;
@@ -114,32 +119,48 @@ public class BackupAndRestoreManager implements MotherActivity.OnPermissions {
     }
 
     public void checkPermAndRestore(String backupName) {
+        checkPermAndRestore(backupName, CAT_ALL);
+    }
+
+    public void checkPermAndRestore(String backupName, int categories) {
         if (backupName == null) {
             return;
         }
 
         if (FileHelpers.isExternalStorageReadable()) {
             if (hasStoragePermissions(mContext)) {
-                restoreData(backupName);
+                restoreData(backupName, categories);
             } else {
-                mPendingHandler = () -> restoreData(backupName);
+                mPendingHandler = () -> restoreData(backupName, categories);
                 verifyStoragePermissionsAndReturn();
             }
         }
     }
 
     public void checkPermAndBackup() {
+        checkPermAndBackup(CAT_ALL);
+    }
+
+    public void checkPermAndBackup(int categories) {
         if (FileHelpers.isExternalStorageWritable()) {
             if (hasStoragePermissions(mContext)) {
-                backupData();
+                backupData(categories);
             } else {
-                mPendingHandler = this::backupData;
+                mPendingHandler = () -> backupData(categories);
                 verifyStoragePermissionsAndReturn();
             }
         }
     }
 
     public void backupData() {
+        backupData(CAT_ALL);
+    }
+
+    /**
+     * @param categories sections to save (CAT_*). A partial backup replaces only the files of the chosen sections,
+     *                   the other sections already kept in the backup folder stay untouched.
+     */
+    public void backupData(int categories) {
         Log.d(TAG, "App has been updated or installed. Doing data backup...");
 
         File currentBackup = getBackup();
@@ -171,7 +192,7 @@ public class BackupAndRestoreManager implements MotherActivity.OnPermissions {
         //    FileHelpers.copy(mFilesDir, destination, null, fileName -> Helpers.endsWithAny(fileName.toString(), Utils.BACKUP_DIR_PATTERNS));
         //}
 
-        backupToDir(currentBackup);
+        backupToDir(currentBackup, categories);
 
         if (hasAccessOnlyToAppFolders()) {
             mHelper.exportAppMediaFolder();
@@ -182,6 +203,21 @@ public class BackupAndRestoreManager implements MotherActivity.OnPermissions {
     }
 
     public void backupToDir(File target) {
+        backupToDir(target, CAT_ALL);
+    }
+
+    public void backupToDir(File target, int categories) {
+        categories &= CAT_ALL;
+
+        if (categories == 0) {
+            return;
+        }
+
+        if (categories != CAT_ALL) {
+            backupToDirPartial(target, categories);
+            return;
+        }
+
         if (target.isDirectory()) { // plain sdcard storage
             // remove old backup <app_id>/Backup
             FileHelpers.delete(target);
@@ -199,6 +235,145 @@ public class BackupAndRestoreManager implements MotherActivity.OnPermissions {
             File destination = new File(target, mFilesDir.getName());
             FileHelpers.copy(mFilesDir, destination, null, dir -> Helpers.equalsAny(dir.getName(), Utils.BACKUP_DIRS));
         }
+    }
+
+    private static boolean matchesPrefs(String name, int categories) {
+        if (Helpers.equalsAny(name, "yt_service_prefs.xml")) {
+            return (categories & CAT_ACCOUNT) != 0;
+        }
+
+        if (Helpers.equalsAny(name, "playlist_library.xml")) {
+            return (categories & CAT_LIBRARY) != 0;
+        }
+
+        return (categories & CAT_SETTINGS) != 0 && Helpers.endsWithAny(name, Utils.BACKUP_PREFS);
+    }
+
+    private static boolean matchesDir(String name, int categories) {
+        if (Helpers.equalsAny(name, "yt_service_prefs")) {
+            return (categories & CAT_ACCOUNT) != 0;
+        }
+
+        return (categories & CAT_SETTINGS) != 0 && Helpers.equalsAny(name, "app_prefs", "global_prefs");
+    }
+
+    private static void deleteMatching(File dir, int categories, boolean dirs) {
+        File[] list = dir.listFiles();
+
+        if (list == null) {
+            return;
+        }
+
+        for (File file : list) {
+            boolean match = dirs ? (file.isDirectory() && matchesDir(file.getName(), categories))
+                    : (file.isFile() && matchesPrefs(file.getName(), categories));
+
+            if (match) {
+                FileHelpers.delete(file);
+            }
+        }
+    }
+
+    private void backupToDirPartial(File target, final int categories) {
+        File prefsDest = new File(target, SHARED_PREFS_SUBDIR);
+        File filesDest = new File(target, FILES_SUBDIR);
+
+        // replace only the chosen sections, keep the others
+        deleteMatching(prefsDest, categories, false);
+        deleteMatching(filesDest, categories, true);
+
+        if (mSharedPrefsDir.isDirectory() && !FileHelpers.isEmpty(mSharedPrefsDir)) {
+            FileHelpers.copy(mSharedPrefsDir, prefsDest, file -> matchesPrefs(file.getName(), categories), null);
+
+            // Don't store unique id
+            FileHelpers.delete(new File(prefsDest, HiddenPrefs.SHARED_PREFERENCES_NAME + ".xml"));
+        }
+
+        if (mFilesDir.isDirectory() && !FileHelpers.isEmpty(mFilesDir)) {
+            FileHelpers.copy(mFilesDir, filesDest, null, dir -> matchesDir(dir.getName(), categories));
+        }
+    }
+
+    /**
+     * Sections that really exist inside the backup (CAT_* flags).
+     */
+    public int getAvailableCategories(String backupName) {
+        File backup = getBackupCheck(backupName);
+
+        if (backup == null) {
+            return 0;
+        }
+
+        int[] all = {CAT_SETTINGS, CAT_ACCOUNT, CAT_LIBRARY};
+        int result = 0;
+
+        File[] prefs = new File(backup, SHARED_PREFS_SUBDIR).listFiles();
+
+        if (prefs != null) {
+            for (File file : prefs) {
+                for (int category : all) {
+                    if (file.isFile() && matchesPrefs(file.getName(), category)) {
+                        result |= category;
+                    }
+                }
+            }
+        }
+
+        File[] dirs = new File(backup, FILES_SUBDIR).listFiles();
+
+        if (dirs != null) {
+            for (File dir : dirs) {
+                for (int category : all) {
+                    if (dir.isDirectory() && matchesDir(dir.getName(), category)) {
+                        result |= category;
+                    }
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private void restoreData(String backupName, final int categories) {
+        if ((categories & CAT_ALL) == CAT_ALL) {
+            restoreData(backupName);
+            return;
+        }
+
+        Log.d(TAG, "Restoring chosen sections: " + categories);
+
+        File currentBackup = getBackupCheck(backupName);
+
+        if (currentBackup == null) {
+            MessageHelpers.showLongMessage(mContext, "Oops. Backup folder is empty.");
+            return;
+        }
+
+        // only what the backup really contains: a section missing there must not wipe the current data
+        final int use = categories & getAvailableCategories(backupName);
+
+        if (use == 0) {
+            MessageHelpers.showLongMessage(mContext, R.string.nothing_found);
+            return;
+        }
+
+        File prefsBackup = new File(currentBackup, SHARED_PREFS_SUBDIR);
+        File filesBackup = new File(currentBackup, FILES_SUBDIR);
+
+        deleteMatching(mSharedPrefsDir, use, false);
+        deleteMatching(mFilesDir, use, true);
+
+        FileHelpers.copy(prefsBackup, mSharedPrefsDir, file -> matchesPrefs(file.getName(), use), null);
+        FileHelpers.copy(filesBackup, mFilesDir, null, dir -> matchesDir(dir.getName(), use));
+
+        if ((use & CAT_SETTINGS) != 0) {
+            fixFileNames(mSharedPrefsDir);
+        }
+
+        MessageHelpers.showMessage(mContext, R.string.msg_done);
+
+        // Same as the full restore: the app is killed to apply the data
+        new Handler(mContext.getMainLooper()).postDelayed(() -> Runtime.getRuntime().exit(0), 1_000);
     }
 
     private void restoreData(String backupName) {
