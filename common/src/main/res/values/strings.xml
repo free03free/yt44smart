@@ -978,4 +978,5 @@
     <string name="loading_spinner_color_7">Purple</string>
     <string name="loading_spinner_color_8">Cyan</string>
     <string name="loading_spinner_color_9">Pink</string>
+    <string name="library_opt_home_refresh_row">Refresh card below home rows</string>
 </resources>

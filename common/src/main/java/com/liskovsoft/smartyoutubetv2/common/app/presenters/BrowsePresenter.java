@@ -994,9 +994,22 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
                         error -> {
                             Log.e(TAG, "updateRowsHeader error: %s", error.getMessage());
                             handleLoadError(error);
-                        }, () -> handleLoadError(null));
+                        }, () -> {
+                            appendHomeRefreshRow(section, groupIndex.incrementAndGet());
+                            handleLoadError(null);
+                        });
 
         mActions.add(updateAction);
+    }
+
+    /** Refresh card in its own row below the home rows (can be turned off in the library settings). */
+    private void appendHomeRefreshRow(BrowseSection section, int index) {
+        if (getView() == null || section == null || section.getId() != MediaGroup.TYPE_HOME ||
+                !com.liskovsoft.smartyoutubetv2.common.prefs.LibrarySettings.instance(getContext()).isHomeRefreshRowShown()) {
+            return;
+        }
+
+        showGroup(VideoGroup.from(PlaylistLibraryService.homeRefreshGroup(getContext()), section, index));
     }
 
     private void updateVideoGrid(BrowseSection section, Observable<MediaGroup> group, int column) {

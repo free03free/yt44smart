@@ -38,13 +38,29 @@ public class LibraryRowsPresenter extends BasePresenter<Void> {
     }
 
     public void show() {
+        load(this::showDialog);
+    }
+
+    /** Standalone "reorder library rows" screen (independent from show/hide). */
+    public void showReorderScreen() {
+        load(subscribed -> {
+            collectNames(subscribed);
+            showReorder();
+        });
+    }
+
+    private interface Loaded {
+        void run(List<MediaItem> subscribed);
+    }
+
+    private void load(Loaded onLoaded) {
         MessageHelpers.showMessage(getContext(), str(R.string.library_rows_loading));
 
         final List<MediaItem> subscribed = new ArrayList<>();
         ContentService contentService = getContentService();
 
         if (contentService == null) {
-            showDialog(subscribed);
+            onLoaded.run(subscribed);
             return;
         }
 
@@ -57,18 +73,13 @@ public class LibraryRowsPresenter extends BasePresenter<Void> {
                                 subscribed.addAll(group.getMediaItems());
                             }
                         },
-                        error -> showDialog(subscribed),
-                        () -> showDialog(subscribed));
+                        error -> onLoaded.run(subscribed),
+                        () -> onLoaded.run(subscribed));
     }
 
     private void showDialog(List<MediaItem> subscribed) {
         AppDialogPresenter dialog = AppDialogPresenter.instance(getContext());
         dialog.closeDialog();
-
-        dialog.appendSingleButton(UiOptionItem.from("\uD83D\uDD00 " + str(R.string.library_rows_reorder), o -> {
-            dialog.closeDialog();
-            showReorder();
-        }));
 
         // my collections
         List<OptionItem> collections = new ArrayList<>();
@@ -103,6 +114,18 @@ public class LibraryRowsPresenter extends BasePresenter<Void> {
 
         LibraryRefresh.cancel();
         dialog.showDialog(str(R.string.library_rows_manage), () -> LibraryRefresh.schedule(getContext()));
+    }
+
+    private void collectNames(List<MediaItem> subscribed) {
+        Set<String> seen = new HashSet<>();
+        for (MediaItem item : LocalPlaylistStore.getAll(getContext())) {
+            if (item.getPlaylistId() == null && item.getChannelId() != null) {
+                addChannelOption(new ArrayList<OptionItem>(), item, seen);
+            }
+        }
+        for (MediaItem item : subscribed) {
+            addChannelOption(new ArrayList<OptionItem>(), item, seen);
+        }
     }
 
     private void addChannelOption(List<OptionItem> options, MediaItem item, Set<String> seen) {

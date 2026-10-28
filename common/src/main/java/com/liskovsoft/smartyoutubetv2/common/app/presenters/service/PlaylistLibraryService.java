@@ -86,7 +86,6 @@ public class PlaylistLibraryService {
             // Search results inside the library row
             List<MediaItem> found = LibraryCollections.search(context, openSearch);
             List<MediaItem> row = new ArrayList<>();
-            row.add(collectionCard(LibraryCollections.MARK_BACK, context.getString(R.string.collection_back), null, null));
             row.addAll(found);
             List<MediaGroup> results = new ArrayList<>();
             String label = found.isEmpty() ? openSearch + " - " + context.getString(R.string.collection_search_empty) : openSearch;
@@ -97,7 +96,6 @@ public class PlaylistLibraryService {
         if (openName != null) {
             // Opened collection: back card + sub-collections + its playlists/channels in one row
             List<MediaItem> row = new ArrayList<>();
-            row.add(collectionCard(LibraryCollections.MARK_BACK, context.getString(R.string.collection_back), null, null));
             for (String child : LibraryCollections.children(context, openName)) {
                 if (settings.isKidsMode() && !LibraryCollections.isKids(context, child)) {
                     continue;
@@ -107,7 +105,7 @@ public class PlaylistLibraryService {
             List<MediaItem> items = LibraryCollections.items(context, openName);
             row.addAll(items);
             List<MediaGroup> opened = new ArrayList<>();
-            opened.add(new LibraryGroup(null, title(settings, LibraryCollections.getIcon(context, openName) + " ", openName, row.size() - 1), row));
+            opened.add(new LibraryGroup(null, title(settings, LibraryCollections.getIcon(context, openName) + " ", openName, row.size()), row));
             return Observable.<List<MediaGroup>>just(opened);
         }
 
@@ -433,6 +431,13 @@ public class PlaylistLibraryService {
         }
 
         return result;
+    }
+
+    /** One-card row with a refresh button, appended at the bottom of the home page. */
+    public static MediaGroup homeRefreshGroup(Context context) {
+        List<MediaItem> cards = new ArrayList<>();
+        cards.add(collectionCard(LibraryCollections.MARK_REFRESH, context.getString(R.string.library_refresh_library), null, null));
+        return new LibraryGroup(null, "\uD83D\uDD04 " + context.getString(R.string.library_refresh_title), cards).withKey("sys:refresh");
     }
 
     private static MediaItem collectionCard(String marker, String title, String subtitle, String cover) {

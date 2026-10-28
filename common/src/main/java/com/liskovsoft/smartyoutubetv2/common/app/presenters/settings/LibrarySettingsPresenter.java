@@ -117,7 +117,7 @@ public class LibrarySettingsPresenter extends BasePresenter<Void> {
     private static final String ICON_REORDER = "\uD83D\uDD00 ";
 
     private static final String[] DEFAULT_ORDER = {"shelves", "details", "order", "content", "max_channels",
-            "items", "latest_total", "latest_per", "collections", "rows", "kids", "reset"};
+            "items", "latest_total", "latest_per", "collections", "rows", "rows_order", "kids", "reset"};
 
     /** Title (with its icon) of a settings section, used by the reorder screen. */
     private String sectionTitle(String id) {
@@ -132,6 +132,7 @@ public class LibrarySettingsPresenter extends BasePresenter<Void> {
             case "latest_per": return ICON_LATEST_PER + str(R.string.library_cat_latest_per_source);
             case "collections": return ICON_COLLECTIONS + str(R.string.collection_manage);
             case "rows": return ICON_ROWS + str(R.string.library_rows_manage);
+            case "rows_order": return ICON_REORDER + str(R.string.library_rows_reorder);
             case "kids": return ICON_KIDS + str(R.string.library_kids_title);
             case "reset": return ICON_RESET + str(R.string.library_reset);
             default: return id;
@@ -229,6 +230,7 @@ public class LibrarySettingsPresenter extends BasePresenter<Void> {
         details.add(UiOptionItem.from("\uD83D\uDD22 " + str(R.string.library_opt_show_count), o -> mSettings.setCountShown(o.isSelected()), mSettings.isCountShown()));
         details.add(UiOptionItem.from("\uD83D\uDD0D " + str(R.string.library_opt_search), o -> mSettings.setSearchShown(o.isSelected()), mSettings.isSearchShown()));
         details.add(UiOptionItem.from("\uD83D\uDD04 " + str(R.string.library_opt_refresh_row), o -> mSettings.setRefreshRowShown(o.isSelected()), mSettings.isRefreshRowShown()));
+        details.add(UiOptionItem.from("\uD83D\uDD04 " + str(R.string.library_opt_home_refresh_row), o -> mSettings.setHomeRefreshRowShown(o.isSelected()), mSettings.isHomeRefreshRowShown()));
         details.add(UiOptionItem.from("\uD83D\uDDBC\uFE0F " + str(R.string.library_opt_icons), o -> mSettings.setIconsShown(o.isSelected()), mSettings.isIconsShown()));
         SidebarService sidebar = SidebarService.instance(getContext());
         details.add(UiOptionItem.from("\uD83D\uDE80 " + str(R.string.library_opt_boot),
@@ -287,6 +289,14 @@ public class LibrarySettingsPresenter extends BasePresenter<Void> {
         dialog.appendSingleButton(UiOptionItem.from(ICON_ROWS + str(R.string.library_rows_manage), o -> {
             dialog.closeDialog();
             LibraryRowsPresenter.instance(getContext()).show();
+        }));
+
+        });
+
+        sections.put("rows_order", () -> {
+        dialog.appendSingleButton(UiOptionItem.from(ICON_REORDER + str(R.string.library_rows_reorder), o -> {
+            dialog.closeDialog();
+            LibraryRowsPresenter.instance(getContext()).showReorderScreen();
         }));
 
         });

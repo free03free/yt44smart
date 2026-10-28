@@ -970,4 +970,5 @@
     <string name="loading_spinner_color_7">بنفسجي</string>
     <string name="loading_spinner_color_8">سماوي</string>
     <string name="loading_spinner_color_9">وردي</string>
+    <string name="library_opt_home_refresh_row">بطاقة تحديث أسفل صفوف القائمة الرئيسية</string>
 </resources>

@@ -106,6 +106,8 @@ public class LibrarySettings {
     /** Bottom row with the "refresh library" / "refresh collections" cards. */
     public boolean isRefreshRowShown() { return mPrefs.getBoolean("show_refresh_row", true); }
     public void setRefreshRowShown(boolean v) { mPrefs.edit().putBoolean("show_refresh_row", v).apply(); }
+    public boolean isHomeRefreshRowShown() { return mPrefs.getBoolean("show_home_refresh_row", true); }
+    public void setHomeRefreshRowShown(boolean v) { mPrefs.edit().putBoolean("show_home_refresh_row", v).apply(); }
 
     public boolean isIconsShown() { return mPrefs.getBoolean("show_icons", true); }
     public void setIconsShown(boolean v) { mPrefs.edit().putBoolean("show_icons", v).apply(); }
