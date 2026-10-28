@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.drawable.GradientDrawable;
+import android.os.SystemClock;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
@@ -11,7 +12,6 @@ import android.view.ViewParent;
 import android.view.ViewTreeObserver;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
-import android.widget.TextView;
 
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -24,7 +24,6 @@ import com.liskovsoft.smartyoutubetv2.common.app.presenters.PlaybackPresenter;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.selector.ExoFormatItem;
 import com.liskovsoft.smartyoutubetv2.common.prefs.MiniPlayerData;
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
-import com.liskovsoft.smartyoutubetv2.common.R;
 import com.liskovsoft.smartyoutubetv2.tv.ui.playback.PlaybackActivity;
 import com.liskovsoft.smartyoutubetv2.tv.ui.widgets.embedplayer.EmbedPlayerView;
 
@@ -39,17 +38,21 @@ import com.liskovsoft.smartyoutubetv2.tv.ui.widgets.embedplayer.EmbedPlayerView;
  * <ul>
  *     <li>Press the arrow towards the window's corner at the edge of the screen - the window gets the focus</li>
  *     <li>OK on the focused window - expand to fullscreen</li>
+ *     <li>Long press OK on the focused window - close the window without playing the video</li>
  *     <li>Arrow away from the corner (or Back) on the focused window - return to browsing</li>
  *     <li>Play/Pause - pause or resume</li>
  *     <li>Long press Play/Pause - expand to fullscreen</li>
  *     <li>Stop - close the window</li>
+ *     <li>Optional: a video chosen in the app while the window is visible plays in the window (not fullscreen)</li>
  * </ul>
  */
 public final class MiniPlayerManager {
     private static final String TAG = MiniPlayerManager.class.getSimpleName();
-    // Wait until the fullscreen activity releases its engine, otherwise both fight over the presenter
-    private static final long START_DELAY_MS = 1200;
-    private static final long HINT_HIDE_DELAY_MS = 7_000;
+    // Start as soon as the fullscreen player has released its engine (otherwise both fight over the presenter)
+    private static final long START_FIRST_CHECK_MS = 250;
+    private static final long START_RETRY_MS = 100;
+    private static final long START_MAX_WAIT_MS = 2500;
+    private static long sStartDeadline;
 
     private static Video sVideo;
     private static long sPositionMs;
@@ -57,6 +60,8 @@ public final class MiniPlayerManager {
     private static FrameLayout sContainer;
     private static EmbedPlayerView sPlayerView;
     private static boolean sLongPressHandled;
+    // After a long press on OK the window is gone. Swallow the rest of that key press so it doesn't click anything below.
+    private static boolean sConsumeEnterUntilUp;
     private static int sPosition = MiniPlayerData.POSITION_BOTTOM_RIGHT;
     private static WeakReference<View> sPrevFocus;
     private static WeakReference<View> sPendingFocus;
@@ -69,6 +74,10 @@ public final class MiniPlayerManager {
             (oldFocus, newFocus) -> sFocusChanged = true;
     private static Activity sPendingHost;
     private static final Runnable sStartRunnable = MiniPlayerManager::startPending;
+
+    static {
+        PlaybackPresenter.setVideoInterceptor(MiniPlayerManager::onOpenVideo);
+    }
 
     private MiniPlayerManager() {
     }
@@ -108,8 +117,9 @@ public final class MiniPlayerManager {
         savePositionAndDestroyView();
 
         sPendingHost = activity;
+        sStartDeadline = SystemClock.uptimeMillis() + START_MAX_WAIT_MS;
         Utils.removeCallbacks(sStartRunnable);
-        Utils.postDelayed(sStartRunnable, START_DELAY_MS);
+        Utils.postDelayed(sStartRunnable, START_FIRST_CHECK_MS);
     }
 
     public static void onActivityStopped(Activity activity) {
@@ -133,6 +143,13 @@ public final class MiniPlayerManager {
      * @return true when the event has been consumed
      */
     public static boolean handleKeyEvent(Activity activity, KeyEvent event) {
+        if (sConsumeEnterUntilUp && isEnterKey(event.getKeyCode())) {
+            if (event.getAction() == KeyEvent.ACTION_UP) {
+                sConsumeEnterUntilUp = false;
+            }
+            return true;
+        }
+
         if (sPlayerView == null || sHost != activity || activity instanceof PlaybackActivity) {
             return false;
         }
@@ -302,8 +319,18 @@ public final class MiniPlayerManager {
             case KeyEvent.KEYCODE_DPAD_CENTER:
             case KeyEvent.KEYCODE_ENTER:
             case KeyEvent.KEYCODE_NUMPAD_ENTER:
-                if (event.getAction() == KeyEvent.ACTION_UP) {
-                    expand();
+                if (isDown) {
+                    if (event.getRepeatCount() > 0 && !sLongPressHandled) {
+                        // Long press OK: close the window without starting the fullscreen playback
+                        returnFocus();
+                        dismiss();
+                        sConsumeEnterUntilUp = true;
+                    }
+                } else if (event.getAction() == KeyEvent.ACTION_UP) {
+                    if (!sLongPressHandled) {
+                        expand();
+                    }
+                    sLongPressHandled = false;
                 }
                 return true;
             case KeyEvent.KEYCODE_BACK:
@@ -360,6 +387,46 @@ public final class MiniPlayerManager {
         }
     }
 
+    private static boolean isEnterKey(int keyCode) {
+        return keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER ||
+                keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER;
+    }
+
+    /**
+     * Called before the fullscreen player starts. While the mini window is visible and the option is on,
+     * the chosen video replaces the one in the window instead of opening fullscreen.
+     *
+     * @return true when the video has been taken over by the mini window
+     */
+    private static boolean onOpenVideo(Video video) {
+        Activity host = sHost;
+
+        if (video == null || host == null || sPlayerView == null || sContainer == null || host instanceof PlaybackActivity ||
+                host.isFinishing() || host.isDestroyed()) {
+            return false;
+        }
+
+        MiniPlayerData data = MiniPlayerData.instance(host);
+
+        if (!data.isEnabled() || !data.isPlayInMiniEnabled()) {
+            return false;
+        }
+
+        sVideo = Video.from(video);
+        sPositionMs = Math.max(video.pendingPosMs, 0);
+        sLongPressHandled = false;
+
+        // Recreate the window with the new video. It keeps the focus state of the browse screen untouched.
+        boolean hadFocus = sContainer.hasFocus();
+        createView(host);
+
+        if (hadFocus && sContainer != null) {
+            sContainer.requestFocus();
+        }
+
+        return true;
+    }
+
     private static boolean isBottom() {
         return sPosition == MiniPlayerData.POSITION_BOTTOM_RIGHT || sPosition == MiniPlayerData.POSITION_BOTTOM_LEFT;
     }
@@ -393,18 +460,24 @@ public final class MiniPlayerManager {
 
     private static void startPending() {
         Activity activity = sPendingHost;
-        sPendingHost = null;
 
         if (activity == null || sVideo == null || activity.isFinishing() || activity.isDestroyed()) {
+            sPendingHost = null;
             return;
         }
 
-        // Fullscreen playback is still alive. Don't interfere
+        // Fullscreen playback is still releasing its engine. Check again shortly
         PlaybackPresenter presenter = PlaybackPresenter.instance(activity);
         if (presenter.getView() != null && !presenter.getView().isEmbed() && presenter.isEngineInitialized()) {
+            if (SystemClock.uptimeMillis() < sStartDeadline) {
+                Utils.postDelayed(sStartRunnable, START_RETRY_MS);
+            } else {
+                sPendingHost = null; // fullscreen playback is really running. Don't interfere
+            }
             return;
         }
 
+        sPendingHost = null;
         createView(activity);
     }
 
@@ -441,17 +514,6 @@ public final class MiniPlayerManager {
         playerView.setFocusable(false);
         container.addView(playerView, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-
-        TextView hint = new TextView(activity);
-        hint.setText(R.string.mini_player_hint);
-        hint.setTextColor(Color.WHITE);
-        hint.setTextSize(12);
-        hint.setBackgroundColor(0xAA000000);
-        hint.setPadding(margin / 2, margin / 4, margin / 2, margin / 4);
-        hint.setGravity(Gravity.CENTER);
-        container.addView(hint, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM));
-        Utils.postDelayed(() -> hint.setVisibility(View.GONE), HINT_HIDE_DELAY_MS);
 
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(width, height, getGravity(data.getPosition()));
         lp.setMargins(margin, margin, margin, margin);

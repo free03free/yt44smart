@@ -332,6 +332,11 @@ public class GeneralSettingsPresenter extends BasePresenter<Void> {
                 option -> data.setEnabled(option.isSelected()),
                 data.isEnabled()));
 
+        settingsPresenter.appendSingleSwitch(UiOptionItem.from(
+                getContext().getString(R.string.mini_player_play_in_mini),
+                option -> data.setPlayInMiniEnabled(option.isSelected()),
+                data.isPlayInMiniEnabled()));
+
         List<OptionItem> positions = new ArrayList<>();
         int[] positionIds = {MiniPlayerData.POSITION_BOTTOM_RIGHT, MiniPlayerData.POSITION_BOTTOM_LEFT,
                 MiniPlayerData.POSITION_TOP_RIGHT, MiniPlayerData.POSITION_TOP_LEFT};

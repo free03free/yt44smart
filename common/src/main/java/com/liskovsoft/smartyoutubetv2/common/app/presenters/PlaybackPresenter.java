@@ -68,6 +68,22 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
         mEventListeners.add(new CommentsController());
     }
 
+    /**
+     * Lets the UI layer (e.g. the in-app mini player) take over a video before the fullscreen player starts.
+     */
+    public interface VideoInterceptor {
+        /**
+         * @return true when the video has been handled and the fullscreen player must not be started
+         */
+        boolean onOpenVideo(Video video);
+    }
+
+    private static VideoInterceptor sVideoInterceptor;
+
+    public static void setVideoInterceptor(VideoInterceptor interceptor) {
+        sVideoInterceptor = interceptor;
+    }
+
     public static PlaybackPresenter instance(Context context) {
         if (sInstance == null) {
             sInstance = new PlaybackPresenter(context);
@@ -111,6 +127,10 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
 
     public void openVideo(Video video) {
         if (video == null) {
+            return;
+        }
+
+        if (sVideoInterceptor != null && sVideoInterceptor.onOpenVideo(video)) {
             return;
         }
 

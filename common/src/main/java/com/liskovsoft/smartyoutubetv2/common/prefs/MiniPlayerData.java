@@ -25,6 +25,7 @@ public class MiniPlayerData {
     private static final String KEY_SIZE = "size"; // legacy: small/medium/large
     private static final String KEY_SIZE_PERCENT = "size_percent";
     private static final String KEY_QUALITY = "quality";
+    private static final String KEY_PLAY_IN_MINI = "play_in_mini";
 
     private static MiniPlayerData sInstance;
     private final SharedPreferences mPrefs;
@@ -47,6 +48,17 @@ public class MiniPlayerData {
 
     public void setEnabled(boolean enabled) {
         mPrefs.edit().putBoolean(KEY_ENABLED, enabled).apply();
+    }
+
+    /**
+     * When the mini player is visible, a video chosen in the app plays inside the mini window instead of fullscreen.
+     */
+    public boolean isPlayInMiniEnabled() {
+        return mPrefs.getBoolean(KEY_PLAY_IN_MINI, false);
+    }
+
+    public void setPlayInMiniEnabled(boolean enabled) {
+        mPrefs.edit().putBoolean(KEY_PLAY_IN_MINI, enabled).apply();
     }
 
     public int getPosition() {

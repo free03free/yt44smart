@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Old Android TV boxes (7.1 and below) lack newer root certificates, which breaks the update check with
+  "Trust anchor for certification path not found". The roots below are added to the system ones.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="@raw/ca_isrg_root_x1" />
+            <certificates src="@raw/ca_isrg_root_x2" />
+            <certificates src="@raw/ca_usertrust_rsa" />
+            <certificates src="@raw/ca_usertrust_ecc" />
+            <certificates src="@raw/ca_sectigo_r46" />
+            <certificates src="@raw/ca_sectigo_e46" />
+            <certificates src="@raw/ca_digicert_global" />
+            <certificates src="@raw/ca_digicert_g2" />
+            <certificates src="@raw/ca_digicert_g3" />
+            <certificates src="@raw/ca_gts_r1" />
+            <certificates src="@raw/ca_gts_r2" />
+            <certificates src="@raw/ca_gts_r3" />
+            <certificates src="@raw/ca_gts_r4" />
+            <certificates src="@raw/ca_globalsign_r3" />
+            <certificates src="@raw/ca_globalsign_r46" />
+            <certificates src="@raw/ca_globalsign_e46" />
+            <certificates src="@raw/ca_amazon_1" />
+            <certificates src="@raw/ca_amazon_2" />
+            <certificates src="@raw/ca_amazon_3" />
+            <certificates src="@raw/ca_amazon_4" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

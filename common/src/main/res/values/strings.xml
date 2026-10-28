@@ -916,13 +916,13 @@
     <string name="custom_update_downgrade">The downloaded version is older than the installed one. Android does not allow that.</string>
     <string name="custom_update_open_browser">Download with browser</string>
     <string name="mini_player_title">Mini player: Back button keeps the video in a corner window while browsing</string>
+    <string name="mini_player_play_in_mini">Mini player: while it is playing, open chosen videos inside the mini window instead of fullscreen</string>
     <string name="mini_player_position">Mini player position</string>
     <string name="mini_player_pos_bottom_right">Bottom right</string>
     <string name="mini_player_pos_bottom_left">Bottom left</string>
     <string name="mini_player_pos_top_right">Top right</string>
     <string name="mini_player_pos_top_left">Top left</string>
     <string name="mini_player_size">Mini player size (percent of screen width)</string>
-    <string name="mini_player_hint">Arrow to the corner + OK: fullscreen · Play/Pause: pause · Stop: close</string>
     <string name="mini_player_quality">Mini player quality (higher uses more bandwidth and CPU)</string>
     <string name="loading_spinner_title">Loading indicator</string>
     <string name="loading_spinner_style_0">Default</string>
