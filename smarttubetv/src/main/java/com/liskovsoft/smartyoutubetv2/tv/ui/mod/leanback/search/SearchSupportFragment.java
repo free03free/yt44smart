@@ -213,6 +213,9 @@ public class SearchSupportFragment extends Fragment {
     RowsSupportFragment mRowsSupportFragment;
     SearchBar mSearchBar;
     SearchEditText mSearchTextEditor;
+    // Text typed before the keyboard was closed with Back. Some keyboards wipe the field while hiding.
+    private String mKeptQuery;
+    private final Runnable mRestoreQueryRunnable = this::restoreKeptQuery;
     SpeechOrbView mSpeechOrbView;
     SearchResultProvider mProvider;
     String mPendingQuery = null;
@@ -337,6 +340,9 @@ public class SearchSupportFragment extends Fragment {
                 if (DEBUG) Log.v(TAG, String.format("onKeyboardDismiss %s", query));
                 // MOD: don't focus on results row after hiding keyboard
                 //queryComplete();
+
+                // MOD: closing the keyboard must not erase what the user has typed
+                keepQueryAfterKeyboardDismiss(query);
             }
         });
         mSearchBar.setSpeechRecognitionCallback(mSpeechRecognitionCallback);
@@ -373,6 +379,12 @@ public class SearchSupportFragment extends Fragment {
             @Override
             public void afterTextChanged(Editable s) {
                 Utils.enableScreensaver(getActivity(), true);
+
+                // User has typed something new: nothing to restore anymore
+                if (!TextUtils.isEmpty(s) && !s.toString().equals(mKeptQuery)) {
+                    mKeptQuery = null;
+                    Utils.removeCallbacks(mRestoreQueryRunnable);
+                }
             }
         });
         if (mIsKeyboardFixEnabled) {
@@ -510,6 +522,8 @@ public class SearchSupportFragment extends Fragment {
 
     @Override
     public void onDestroy() {
+        Utils.removeCallbacks(mRestoreQueryRunnable);
+        mKeptQuery = null;
         releaseAdapter();
         super.onDestroy();
     }
@@ -914,6 +928,35 @@ public class SearchSupportFragment extends Fragment {
             String query = mPendingQuery;
             mPendingQuery = null;
             retrieveResults(query);
+        }
+    }
+
+    private void keepQueryAfterKeyboardDismiss(String query) {
+        Utils.removeCallbacks(mRestoreQueryRunnable);
+
+        if (TextUtils.isEmpty(query)) {
+            mKeptQuery = null;
+            return;
+        }
+
+        mKeptQuery = query;
+
+        // The keyboard may clear the field a bit later than the dismiss callback. Check several times.
+        Utils.postDelayed(mRestoreQueryRunnable, 150);
+        Utils.postDelayed(mRestoreQueryRunnable, 500);
+        Utils.postDelayed(mRestoreQueryRunnable, 1200);
+    }
+
+    private void restoreKeptQuery() {
+        String query = mKeptQuery;
+
+        if (query == null || mSearchBar == null || mSearchTextEditor == null || !isAdded()) {
+            return;
+        }
+
+        if (TextUtils.isEmpty(mSearchTextEditor.getText())) {
+            mSearchBar.setSearchQuery(query);
+            mSearchTextEditor.setSelection(mSearchTextEditor.getText().length());
         }
     }
 
