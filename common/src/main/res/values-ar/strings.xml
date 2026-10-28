@@ -914,7 +914,7 @@
     <string name="mini_player_pos_top_right">أعلى اليمين</string>
     <string name="mini_player_pos_top_left">أعلى اليسار</string>
     <string name="mini_player_size">حجم المشغّل المصغّر (٪ من عرض الشاشة)</string>
-    <string name="mini_player_hint">تشغيل/إيقاف: إيقاف مؤقت · ضغطة مطولة: ملء الشاشة · Stop: إغلاق</string>
+    <string name="mini_player_hint">سهم نحو الزاوية ثم OK: ملء الشاشة · تشغيل/إيقاف: إيقاف مؤقت · Stop: إغلاق</string>
     <string name="mini_player_quality">جودة المشغّل المصغّر (الأعلى تستهلك إنترنت ومعالجاً أكثر)</string>
     <string name="loading_spinner_title">شكل إشارة التحميل</string>
     <string name="loading_spinner_style_0">الافتراضي</string>

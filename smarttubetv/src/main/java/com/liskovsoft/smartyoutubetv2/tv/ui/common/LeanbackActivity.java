@@ -3,6 +3,7 @@ package com.liskovsoft.smartyoutubetv2.tv.ui.common;
 import android.annotation.SuppressLint;
 import android.os.Bundle;
 import android.view.KeyEvent;
+import android.view.View;
 
 import com.liskovsoft.sharedutils.mylogger.Log;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.SearchPresenter;
@@ -56,7 +57,10 @@ public abstract class LeanbackActivity extends MotherActivity {
         }
 
         KeyEvent newEvent = mGlobalKeyTranslator.translate(event);
-        return super.dispatchKeyEvent(newEvent);
+        View focusBefore = getCurrentFocus();
+        boolean handled = super.dispatchKeyEvent(newEvent);
+        MiniPlayerManager.onKeyDispatched(this, newEvent, focusBefore);
+        return handled;
     }
 
     public UriBackgroundManager getBackgroundManager() {

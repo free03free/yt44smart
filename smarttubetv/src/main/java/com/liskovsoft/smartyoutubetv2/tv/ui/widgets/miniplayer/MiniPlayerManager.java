@@ -2,12 +2,16 @@ package com.liskovsoft.smartyoutubetv2.tv.ui.widgets.miniplayer;
 
 import android.app.Activity;
 import android.graphics.Color;
+import android.graphics.Rect;
+import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.TextView;
+
+import java.lang.ref.WeakReference;
 
 import com.liskovsoft.sharedutils.mylogger.Log;
 import com.liskovsoft.smartyoutubetv2.common.app.models.data.Video;
@@ -27,6 +31,9 @@ import com.liskovsoft.smartyoutubetv2.tv.ui.widgets.embedplayer.EmbedPlayerView;
  * <br>
  * Remote control while the window is visible:
  * <ul>
+ *     <li>Press the arrow towards the window's corner at the edge of the screen - the window gets the focus</li>
+ *     <li>OK on the focused window - expand to fullscreen</li>
+ *     <li>Arrow away from the corner (or Back) on the focused window - return to browsing</li>
  *     <li>Play/Pause - pause or resume</li>
  *     <li>Long press Play/Pause - expand to fullscreen</li>
  *     <li>Stop - close the window</li>
@@ -44,6 +51,8 @@ public final class MiniPlayerManager {
     private static FrameLayout sContainer;
     private static EmbedPlayerView sPlayerView;
     private static boolean sLongPressHandled;
+    private static int sPosition = MiniPlayerData.POSITION_BOTTOM_RIGHT;
+    private static WeakReference<View> sPrevFocus;
     private static Activity sPendingHost;
     private static final Runnable sStartRunnable = MiniPlayerManager::startPending;
 
@@ -110,6 +119,10 @@ public final class MiniPlayerManager {
 
         int keyCode = event.getKeyCode();
 
+        if (sContainer != null && sContainer.hasFocus() && handleFocusedKey(event)) {
+            return true;
+        }
+
         if (keyCode == KeyEvent.KEYCODE_MEDIA_STOP) {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
                 dismiss();
@@ -133,6 +146,106 @@ public final class MiniPlayerManager {
         }
 
         return false;
+    }
+
+    /**
+     * Called after the activity has dispatched the key. When the user pressed the arrow towards the window's corner
+     * and nothing else could take the focus (edge of the screen), the focus moves to the mini window.
+     */
+    public static void onKeyDispatched(Activity activity, KeyEvent event, View focusBefore) {
+        if (sContainer == null || sHost != activity || activity instanceof PlaybackActivity ||
+                event.getAction() != KeyEvent.ACTION_DOWN || event.getRepeatCount() != 0 || focusBefore == null) {
+            return;
+        }
+
+        int keyCode = event.getKeyCode();
+        boolean isVertical = keyCode == (isBottom() ? KeyEvent.KEYCODE_DPAD_DOWN : KeyEvent.KEYCODE_DPAD_UP);
+        boolean isSide = keyCode == (isRight() ? KeyEvent.KEYCODE_DPAD_RIGHT : KeyEvent.KEYCODE_DPAD_LEFT);
+
+        if (!isVertical && !isSide) {
+            return;
+        }
+
+        // The focus has been moved by the app itself. Not the edge
+        if (sContainer.hasFocus() || activity.getCurrentFocus() != focusBefore) {
+            return;
+        }
+
+        // Side arrow works only when the focused item is on the same band as the window
+        if (isSide && !isSameBand(focusBefore, sContainer)) {
+            return;
+        }
+
+        sPrevFocus = new WeakReference<>(focusBefore);
+        sContainer.requestFocus();
+    }
+
+    private static boolean handleFocusedKey(KeyEvent event) {
+        int keyCode = event.getKeyCode();
+        boolean isDown = event.getAction() == KeyEvent.ACTION_DOWN;
+
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_DPAD_CENTER:
+            case KeyEvent.KEYCODE_ENTER:
+            case KeyEvent.KEYCODE_NUMPAD_ENTER:
+                if (event.getAction() == KeyEvent.ACTION_UP) {
+                    expand();
+                }
+                return true;
+            case KeyEvent.KEYCODE_BACK:
+            case KeyEvent.KEYCODE_ESCAPE:
+                if (isDown) {
+                    returnFocus();
+                }
+                return true;
+            case KeyEvent.KEYCODE_DPAD_UP:
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+                boolean towardsCorner = keyCode == (isBottom() ? KeyEvent.KEYCODE_DPAD_DOWN : KeyEvent.KEYCODE_DPAD_UP) ||
+                        keyCode == (isRight() ? KeyEvent.KEYCODE_DPAD_RIGHT : KeyEvent.KEYCODE_DPAD_LEFT);
+                if (isDown && !towardsCorner) {
+                    returnFocus();
+                }
+                return true; // the window is in the corner: nowhere to go
+            default:
+                return false;
+        }
+    }
+
+    private static void returnFocus() {
+        View prev = sPrevFocus != null ? sPrevFocus.get() : null;
+
+        if (prev != null && prev.isAttachedToWindow() && prev.requestFocus()) {
+            return;
+        }
+
+        // Previous focus is lost. Let the system find the closest item
+        if (sContainer != null && sContainer.getParent() instanceof ViewGroup) {
+            View next = sContainer.focusSearch(isBottom() ? View.FOCUS_UP : View.FOCUS_DOWN);
+            if (next != null && next != sContainer) {
+                next.requestFocus();
+            }
+        }
+    }
+
+    private static boolean isBottom() {
+        return sPosition == MiniPlayerData.POSITION_BOTTOM_RIGHT || sPosition == MiniPlayerData.POSITION_BOTTOM_LEFT;
+    }
+
+    private static boolean isRight() {
+        return sPosition == MiniPlayerData.POSITION_BOTTOM_RIGHT || sPosition == MiniPlayerData.POSITION_TOP_RIGHT;
+    }
+
+    private static boolean isSameBand(View a, View b) {
+        Rect ra = new Rect();
+        Rect rb = new Rect();
+
+        if (!a.getGlobalVisibleRect(ra) || !b.getGlobalVisibleRect(rb)) {
+            return false;
+        }
+
+        return ra.top < rb.bottom && ra.bottom > rb.top;
     }
 
     /**
@@ -182,9 +295,12 @@ public final class MiniPlayerManager {
 
         FrameLayout container = new FrameLayout(activity);
         container.setBackgroundColor(Color.BLACK);
-        container.setFocusable(false);
+        container.setFocusable(true);
         container.setFocusableInTouchMode(false);
+        container.setClickable(true);
         container.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        container.setOnClickListener(v -> expand());
+        container.setOnFocusChangeListener((v, hasFocus) -> onWindowFocusChanged(v, hasFocus));
 
         EmbedPlayerView playerView = new EmbedPlayerView(activity);
         playerView.setQuality(EmbedPlayerView.QUALITY_NORMAL);
@@ -192,7 +308,6 @@ public final class MiniPlayerManager {
         playerView.setUseController(false);
         playerView.setBackgroundColor(Color.BLACK);
         playerView.setFocusable(false);
-        playerView.setOnClickListener(v -> expand()); // touch devices
         container.addView(playerView, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
@@ -214,6 +329,8 @@ public final class MiniPlayerManager {
         sHost = activity;
         sContainer = container;
         sPlayerView = playerView;
+        sPosition = data.getPosition();
+        sPrevFocus = null;
 
         Video video = Video.from(sVideo);
         video.pendingPosMs = sPositionMs;
@@ -223,6 +340,20 @@ public final class MiniPlayerManager {
         } catch (Exception e) {
             Log.e(TAG, "Mini player failed to start: %s", e.getMessage());
             dismiss();
+        }
+    }
+
+    private static void onWindowFocusChanged(View view, boolean hasFocus) {
+        if (hasFocus) {
+            GradientDrawable border = new GradientDrawable();
+            border.setColor(Color.TRANSPARENT);
+            float density = view.getResources().getDisplayMetrics().density;
+            border.setStroke((int) (density * 6), Color.WHITE);
+            ((FrameLayout) view).setForeground(border);
+            view.animate().scaleX(1.06f).scaleY(1.06f).setDuration(120).start();
+        } else {
+            ((FrameLayout) view).setForeground(null);
+            view.animate().scaleX(1f).scaleY(1f).setDuration(120).start();
         }
     }
 
