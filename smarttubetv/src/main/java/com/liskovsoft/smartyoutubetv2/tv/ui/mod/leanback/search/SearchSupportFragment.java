@@ -10,6 +10,7 @@ import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
 import android.text.Editable;
 import android.text.InputType;
+import android.content.Context;
 import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.util.Log;
@@ -19,6 +20,9 @@ import android.view.View.OnFocusChangeListener;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.view.inputmethod.CompletionInfo;
+import android.view.inputmethod.InputMethodManager;
+import java.lang.reflect.Method;
+import com.liskovsoft.smartyoutubetv2.tv.ui.search.tags.SearchTagsActivity;
 import android.widget.FrameLayout;
 import androidx.fragment.app.Fragment;
 import androidx.leanback.R;
@@ -215,6 +219,7 @@ public class SearchSupportFragment extends Fragment {
     SearchEditText mSearchTextEditor;
     // Text typed before the keyboard was closed with Back. Some keyboards wipe the field while hiding.
     private String mKeptQuery;
+    private static final long KEYBOARD_BACK_GUARD_MS = 700;
     private final Runnable mRestoreQueryRunnable = this::restoreKeptQuery;
     SpeechOrbView mSpeechOrbView;
     SearchResultProvider mProvider;
@@ -341,7 +346,10 @@ public class SearchSupportFragment extends Fragment {
                 // MOD: don't focus on results row after hiding keyboard
                 //queryComplete();
 
-                // MOD: closing the keyboard must not erase what the user has typed
+                // MOD: closing the keyboard must not close the search screen nor erase what the user has typed
+                if (getActivity() instanceof SearchTagsActivity && isKeyboardVisible()) {
+                    ((SearchTagsActivity) getActivity()).blockBackFor(KEYBOARD_BACK_GUARD_MS);
+                }
                 keepQueryAfterKeyboardDismiss(query);
             }
         });
@@ -928,6 +936,20 @@ public class SearchSupportFragment extends Fragment {
             String query = mPendingQuery;
             mPendingQuery = null;
             retrieveResults(query);
+        }
+    }
+
+    /**
+     * Hidden API of the input method manager. Works on old TV boxes (Android 7-8). Returns false when unavailable.
+     */
+    private boolean isKeyboardVisible() {
+        try {
+            InputMethodManager imm = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+            Method method = InputMethodManager.class.getMethod("getInputMethodWindowVisibleHeight");
+            Object height = method.invoke(imm);
+            return height instanceof Integer && (Integer) height > 0;
+        } catch (Throwable e) {
+            return false;
         }
     }
 

@@ -1,6 +1,7 @@
 package com.liskovsoft.smartyoutubetv2.tv.ui.search.tags;
 
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.view.KeyEvent;
 import com.liskovsoft.smartyoutubetv2.tv.R;
 import com.liskovsoft.smartyoutubetv2.tv.ui.common.LeanbackActivity;
@@ -8,6 +9,7 @@ import com.liskovsoft.smartyoutubetv2.tv.ui.common.LeanbackActivity;
 public class SearchTagsActivity extends LeanbackActivity {
     private SearchTagsFragment mFragment;
     private boolean mDownPressed;
+    private long mBlockBackUntil;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -24,6 +26,23 @@ public class SearchTagsActivity extends LeanbackActivity {
             mFragment.focusOnSearchField();
         }
         return super.onKeyDown(keyCode, event);
+    }
+
+    /**
+     * Back button that closes the on-screen keyboard must not close the search screen too.
+     * Some TV keyboards let the same key press through to the activity.
+     */
+    public void blockBackFor(long durationMs) {
+        mBlockBackUntil = SystemClock.uptimeMillis() + durationMs;
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (SystemClock.uptimeMillis() < mBlockBackUntil) {
+            return;
+        }
+
+        super.onBackPressed();
     }
 
     @Override
