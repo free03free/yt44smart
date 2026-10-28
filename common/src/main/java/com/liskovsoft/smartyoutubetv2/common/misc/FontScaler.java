@@ -27,7 +27,9 @@ public final class FontScaler {
     DETAILS(R.string.font_cat_details),
     PLAYER_TIME(R.string.font_cat_player_time),
     PLAYER_INFO(R.string.font_cat_player_info),
-    BUTTONS(R.string.font_cat_buttons);
+    BUTTONS(R.string.font_cat_buttons),
+    SETTINGS_ITEM(R.string.font_cat_settings_item),
+    SETTINGS_DESC(R.string.font_cat_settings_desc);
 
         public final int titleResId;
 
@@ -112,10 +114,15 @@ public final class FontScaler {
                 return Category.CARD_INFO;
             case "row_header": case "row_header_description": case "header_label":
                 return Category.ROW_HEADER;
-            case "guidedactions_item_title": case "text_option_title": case "settings_title": case "decor_title":
+            case "guidedactions_item_title": case "text_option_title":
                 return Category.MENU_ITEM;
+            case "settings_title": case "decor_title":
+            case "title": // android.R.id.title: settings (preference) items and list-dialog items
+                return Category.SETTINGS_ITEM;
             case "guidedactions_item_description": case "text_option_value": case "guidance_description":
                 return Category.MENU_DESC;
+            case "summary": case "seekbar_value": // android.R.id.summary: settings (preference) item descriptions
+                return Category.SETTINGS_DESC;
             case "guidance_title": case "guidance_breadcrumb":
                 return Category.DIALOG_TITLE;
             case "pip_title":

@@ -101,7 +101,7 @@ public class MainUIData extends DataChangeBase implements ProfileChangeListener 
     private float mUIScale;
     private float mRowTitleScale;
     private float mFontScale;
-    private final float[] mFontScales = new float[11];
+    private final float[] mFontScales = new float[13];
     {
         java.util.Arrays.fill(mFontScales, 1.0f);
     }
@@ -609,6 +609,8 @@ public class MainUIData extends DataChangeBase implements ProfileChangeListener 
         mFontScales[8] = Helpers.parseFloat(split, 37, 1.0f);
         mFontScales[9] = Helpers.parseFloat(split, 38, 1.0f);
         mFontScales[10] = Helpers.parseFloat(split, 39, 1.0f);
+        mFontScales[11] = Helpers.parseFloat(split, 40, 1.0f);
+        mFontScales[12] = Helpers.parseFloat(split, 41, 1.0f);
 
         int idx = -1;
         for (Long menuItem : MENU_ITEM_DEFAULT_ORDER) {
@@ -657,7 +659,7 @@ public class MainUIData extends DataChangeBase implements ProfileChangeListener 
                 null, mThumbQuality, mIsCardMultilineSubtitleEnabled, Helpers.mergeList(mMenuItemsOrdered),
                 mIsChannelsFilterEnabled, mIsChannelSearchBarEnabled, mIsPinnedChannelRowsEnabled, mCardPreviewType,
                 mIsUnlocalizedTitlesEnabled, mUiTweaks,
-                mRowTitleScale, mRowTitleColor, mIsRowTitleBold, mFontScale, null, mFontScales[0], mFontScales[1], mFontScales[2], mFontScales[3], mFontScales[4], mFontScales[5], mFontScales[6], mFontScales[7], mFontScales[8], mFontScales[9], mFontScales[10]));
+                mRowTitleScale, mRowTitleColor, mIsRowTitleBold, mFontScale, null, mFontScales[0], mFontScales[1], mFontScales[2], mFontScales[3], mFontScales[4], mFontScales[5], mFontScales[6], mFontScales[7], mFontScales[8], mFontScales[9], mFontScales[10], mFontScales[11], mFontScales[12]));
     }
 
     public static class ColorScheme {
