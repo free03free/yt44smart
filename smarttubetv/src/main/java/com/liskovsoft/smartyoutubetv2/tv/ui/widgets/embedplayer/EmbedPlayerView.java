@@ -48,6 +48,7 @@ public class EmbedPlayerView extends PlayerView implements PlaybackView {
     private int mQuality;
     private FormatItem mCustomVideoFormat;
     private float mPercentWatched;
+    private Runnable mOnShown;
 
     public EmbedPlayerView(Context context) {
         super(context);
@@ -70,6 +71,17 @@ public class EmbedPlayerView extends PlayerView implements PlaybackView {
 
     private void showView() {
         setAlpha(1);
+
+        if (mOnShown != null) {
+            mOnShown.run();
+        }
+    }
+
+    /**
+     * Called when the first video frames become visible (the view stops being transparent).
+     */
+    public void setOnShownListener(Runnable listener) {
+        mOnShown = listener;
     }
 
     @Override
@@ -598,6 +610,7 @@ public class EmbedPlayerView extends PlayerView implements PlaybackView {
             mExoPlayerController.release();
             mPlayer = null;
             setPlayer(null);
+            mOnShown = null;
             hideView();
             syncPositionIfNeeded();
         }

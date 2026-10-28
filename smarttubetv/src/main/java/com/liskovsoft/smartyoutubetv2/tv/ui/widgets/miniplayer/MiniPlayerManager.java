@@ -3,6 +3,7 @@ package com.liskovsoft.smartyoutubetv2.tv.ui.widgets.miniplayer;
 import android.app.Activity;
 import android.graphics.Color;
 import android.graphics.Rect;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.SystemClock;
 import android.view.Gravity;
@@ -12,10 +13,15 @@ import android.view.ViewParent;
 import android.view.ViewTreeObserver;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
+import android.widget.ProgressBar;
+
+import androidx.core.content.ContextCompat;
 
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.lang.ref.WeakReference;
+import java.util.ArrayList;
+import java.util.List;
 
 import com.liskovsoft.sharedutils.mylogger.Log;
 import com.liskovsoft.smartyoutubetv2.common.app.models.data.Video;
@@ -26,6 +32,7 @@ import com.liskovsoft.smartyoutubetv2.common.prefs.MiniPlayerData;
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
 import com.liskovsoft.smartyoutubetv2.tv.ui.playback.PlaybackActivity;
 import com.liskovsoft.smartyoutubetv2.tv.ui.widgets.embedplayer.EmbedPlayerView;
+import com.liskovsoft.smartyoutubetv2.tv.ui.widgets.loading.LoadingSpinnerDrawable;
 
 /**
  * In-app mini player: a small floating video window placed in a corner of the browse screens.
@@ -53,6 +60,7 @@ public final class MiniPlayerManager {
     private static final long START_RETRY_MS = 100;
     private static final long START_MAX_WAIT_MS = 2500;
     private static long sStartDeadline;
+    private static final long SPINNER_MAX_MS = 30_000;
 
     private static Video sVideo;
     private static long sPositionMs;
@@ -62,6 +70,20 @@ public final class MiniPlayerManager {
     private static boolean sLongPressHandled;
     // After a long press on OK the window is gone. Swallow the rest of that key press so it doesn't click anything below.
     private static boolean sConsumeEnterUntilUp;
+    // Browse content that has been moved away from the window (to restore its margins later)
+    private static final List<ShiftedView> sShiftedViews = new ArrayList<>();
+
+    private static final class ShiftedView {
+        final WeakReference<View> view;
+        final int topMargin;
+        final int bottomMargin;
+
+        ShiftedView(View view, int topMargin, int bottomMargin) {
+            this.view = new WeakReference<>(view);
+            this.topMargin = topMargin;
+            this.bottomMargin = bottomMargin;
+        }
+    }
     private static int sPosition = MiniPlayerData.POSITION_BOTTOM_RIGHT;
     private static WeakReference<View> sPrevFocus;
     private static WeakReference<View> sPendingFocus;
@@ -515,9 +537,19 @@ public final class MiniPlayerManager {
         container.addView(playerView, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
+        // Loading indicator until the first frames of the new video are shown
+        ProgressBar spinner = createSpinner(activity, height);
+        container.addView(spinner);
+        playerView.setOnShownListener(() -> spinner.setVisibility(View.GONE));
+        // Don't spin forever when the video can't be loaded
+        spinner.postDelayed(() -> spinner.setVisibility(View.GONE), SPINNER_MAX_MS);
+
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(width, height, getGravity(data.getPosition()));
         lp.setMargins(margin, margin, margin, margin);
         root.addView(container, lp);
+
+        // Keep the rows out of the window: the content ends above the window (or starts below it)
+        shiftContent(root, container, height + margin * 2, isBottomPosition(data.getPosition()));
 
         sHost = activity;
         sContainer = container;
@@ -537,6 +569,67 @@ public final class MiniPlayerManager {
             Log.e(TAG, "Mini player failed to start: %s", e.getMessage());
             dismiss();
         }
+    }
+
+    private static ProgressBar createSpinner(Activity activity, int windowHeight) {
+        ProgressBar spinner = new ProgressBar(activity, null, android.R.attr.progressBarStyleLarge);
+        spinner.setIndeterminate(true);
+        spinner.setFocusable(false);
+
+        Drawable custom = LoadingSpinnerDrawable.createFromPrefs(activity);
+        spinner.setIndeterminateDrawable(custom != null ? custom :
+                ContextCompat.getDrawable(activity, com.liskovsoft.smartyoutubetv2.tv.R.drawable.progress_large_holo));
+
+        // Fit the indicator to the small window (the app-wide spinner size may be too big for it)
+        int size = Math.max(windowHeight / 3, (int) (activity.getResources().getDisplayMetrics().density * 24));
+        spinner.setLayoutParams(new FrameLayout.LayoutParams(size, size, Gravity.CENTER));
+
+        return spinner;
+    }
+
+    private static boolean isBottomPosition(int position) {
+        return position == MiniPlayerData.POSITION_BOTTOM_RIGHT || position == MiniPlayerData.POSITION_BOTTOM_LEFT;
+    }
+
+    /**
+     * Reserves the strip of the screen occupied by the window so the rows are laid out next to it, not behind it.
+     */
+    private static void shiftContent(ViewGroup root, View window, int reservedPx, boolean atBottom) {
+        restoreContent();
+
+        for (int i = 0; i < root.getChildCount(); i++) {
+            View child = root.getChildAt(i);
+
+            if (child == window || !(child.getLayoutParams() instanceof ViewGroup.MarginLayoutParams)) {
+                continue;
+            }
+
+            ViewGroup.MarginLayoutParams params = (ViewGroup.MarginLayoutParams) child.getLayoutParams();
+            sShiftedViews.add(new ShiftedView(child, params.topMargin, params.bottomMargin));
+
+            if (atBottom) {
+                params.bottomMargin += reservedPx;
+            } else {
+                params.topMargin += reservedPx;
+            }
+
+            child.setLayoutParams(params);
+        }
+    }
+
+    private static void restoreContent() {
+        for (ShiftedView shifted : sShiftedViews) {
+            View view = shifted.view.get();
+
+            if (view != null && view.getLayoutParams() instanceof ViewGroup.MarginLayoutParams) {
+                ViewGroup.MarginLayoutParams params = (ViewGroup.MarginLayoutParams) view.getLayoutParams();
+                params.topMargin = shifted.topMargin;
+                params.bottomMargin = shifted.bottomMargin;
+                view.setLayoutParams(params);
+            }
+        }
+
+        sShiftedViews.clear();
     }
 
     private static void onWindowFocusChanged(View view, boolean hasFocus) {
@@ -581,6 +674,8 @@ public final class MiniPlayerManager {
             }
             sFocusRoot = null;
         }
+
+        restoreContent();
 
         if (sContainer != null) {
             ViewGroup parent = (ViewGroup) sContainer.getParent();
