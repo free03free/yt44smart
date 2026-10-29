@@ -506,16 +506,20 @@ public class BrowseFragment extends BrowseSupportFragment implements BrowseView 
 
         if (miniWindowVisible && hide) {
             scheduleRowsAlign();
+        } else {
+            clearRowsAlignTopOverride();
         }
     }
 
     private int mAlignTries;
+    private float mLastAlign;
+    private float mLastError;
+    private boolean mHasLast;
     private final Runnable mAlignRows = this::alignRowsUnderMini;
 
     /**
      * The rows must start right below the mini window whatever its size is.
-     * The alignment of the rows may be stale after the window size has changed (big empty gap under the window),
-     * so the real position is measured and corrected.
+     * The real position of the rows depends on the window size and on the screen state, so it is measured and corrected.
      */
     private void scheduleRowsAlign() {
         View root = getView();
@@ -525,9 +529,9 @@ public class BrowseFragment extends BrowseSupportFragment implements BrowseView 
         }
 
         mAlignTries = 0;
+        mHasLast = false;
         root.removeCallbacks(mAlignRows);
-        root.postDelayed(mAlignRows, 200);
-        root.postDelayed(mAlignRows, 700);
+        root.postDelayed(mAlignRows, 250);
     }
 
     private void alignRowsUnderMini() {
@@ -535,6 +539,7 @@ public class BrowseFragment extends BrowseSupportFragment implements BrowseView 
 
         if (getContext() == null || root == null || !MiniPlayerManager.isTopWindowVisible()
                 || !MiniPlayerData.instance(getContext()).isTopBarHidden(true)) {
+            clearRowsAlignTopOverride();
             return;
         }
 
@@ -543,6 +548,12 @@ public class BrowseFragment extends BrowseSupportFragment implements BrowseView 
 
         // Measure only when the first row is the selected one (the other rows are scrolled by design)
         if (grid == null || grid.getChildCount() == 0 || grid.getSelectedPosition() != 0) {
+            return;
+        }
+
+        // Wait until the layout and the scrolling are over
+        if (grid.getScrollState() != androidx.recyclerview.widget.RecyclerView.SCROLL_STATE_IDLE || grid.isLayoutRequested()) {
+            root.postDelayed(mAlignRows, 200);
             return;
         }
 
@@ -555,26 +566,40 @@ public class BrowseFragment extends BrowseSupportFragment implements BrowseView 
         target.getLocationOnScreen(targetLoc);
         dock.getLocationOnScreen(dockLoc);
 
-        // The first cards start exactly at the top of the area reserved for the rows (right under the window)
-        int delta = dockLoc[1] - targetLoc[1];
+        // The first cards must start at the top of the area reserved for the rows (right under the window)
+        float error = dockLoc[1] - targetLoc[1];
         float density = getResources().getDisplayMetrics().density;
 
-        if (Math.abs(delta) <= density * 3) {
+        if (Math.abs(error) <= density * 3) {
             return;
         }
 
-        int current = getContainerListAlignTop();
-        int wanted = Math.max(0, Math.min(mDefaultAlignTop, current + delta));
+        float current = getRowsAlignTop();
 
-        if (wanted == current) {
+        // How much the cards move when the alignment changes (1 on a plain fixed alignment). Learned from the two last measurements
+        float slope = 1f;
+        if (mHasLast && Math.abs(current - mLastAlign) > 1f) {
+            slope = Math.max(0.3f, Math.min(2f, (mLastError - error) / (current - mLastAlign)));
+        }
+
+        float wanted = current + error / slope;
+        float min = -density * 400;
+        float max = density * 400;
+        wanted = Math.max(min, Math.min(max, wanted));
+
+        mHasLast = true;
+        mLastAlign = current;
+        mLastError = error;
+
+        if (Math.abs(wanted - current) < 1f) {
             return;
         }
 
-        setContainerListAlignTop(wanted);
+        setRowsAlignTopOverride(Math.round(wanted));
 
         // The position changes after the layout. Check it again (a few times at most)
-        if (++mAlignTries < 4) {
-            root.postDelayed(mAlignRows, 350);
+        if (++mAlignTries < 6) {
+            root.postDelayed(mAlignRows, 300);
         }
     }
 

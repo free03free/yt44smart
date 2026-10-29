@@ -1726,8 +1726,42 @@ public class BrowseSupportFragment extends BaseSupportFragment {
         return mContainerListAlignTop;
     }
 
+    private static final int NO_ROWS_ALIGN_OVERRIDE = Integer.MIN_VALUE;
+    private int mRowsAlignTopOverride = NO_ROWS_ALIGN_OVERRIDE;
+
+    /**
+     * MOD: align only the rows (not the side menu) at runtime, e.g. to keep them right under the mini window.
+     * The value survives page changes. Use {@link #clearRowsAlignTopOverride()} to go back to the normal alignment.
+     */
+    public void setRowsAlignTopOverride(int alignTopPx) {
+        mRowsAlignTopOverride = alignTopPx;
+
+        if (mMainFragmentAdapter != null) {
+            setMainFragmentAlignment();
+        }
+    }
+
+    public void clearRowsAlignTopOverride() {
+        if (mRowsAlignTopOverride == NO_ROWS_ALIGN_OVERRIDE) {
+            return;
+        }
+
+        mRowsAlignTopOverride = NO_ROWS_ALIGN_OVERRIDE;
+
+        if (mMainFragmentAdapter != null) {
+            setMainFragmentAlignment();
+        }
+    }
+
+    /**
+     * @return the current alignment of the rows (the override when it is set)
+     */
+    public int getRowsAlignTop() {
+        return mRowsAlignTopOverride != NO_ROWS_ALIGN_OVERRIDE ? mRowsAlignTopOverride : mContainerListAlignTop;
+    }
+
     private void setMainFragmentAlignment() {
-        int alignOffset = mContainerListAlignTop;
+        int alignOffset = getRowsAlignTop();
         if (mMainFragmentScaleEnabled
                 && mMainFragmentAdapter.isScalingEnabled()
                 && mShowingHeaders) {
