@@ -100,7 +100,21 @@ public class VideoLoaderController extends BasePlayerController {
         if (getPlayer() == null) {
             return;
         }
-        
+
+        // Mini player full mode: the window has taken over a running engine. The video is already playing: don't load it again
+        if (com.liskovsoft.smartyoutubetv2.common.misc.PlayerHandoff.consumeAdopted()) {
+            Video adopted = Helpers.firstNonNull(mPendingVideo, getVideo());
+            mPendingVideo = null;
+
+            if (adopted != null) {
+                mPlaylist.setCurrent(adopted);
+                getPlayer().setVideo(adopted);
+            }
+
+            getPlayer().setButtonState(R.id.action_repeat, getPlayerData().getPlaybackMode());
+            return;
+        }
+
         loadVideo(Helpers.firstNonNull(mPendingVideo, getVideo()));
         getPlayer().setButtonState(R.id.action_repeat, getPlayerData().getPlaybackMode());
         mPendingVideo = null;
@@ -290,6 +304,9 @@ public class VideoLoaderController extends BasePlayerController {
         String bgImageUrl = null;
 
         getVideo().sync(formatInfo);
+
+        // Remember the loaded stream urls: the mini window <-> fullscreen switch reuses them (no reload)
+        com.liskovsoft.smartyoutubetv2.common.misc.FormatInfoPrefetcher.noteLoaded(getVideo().videoId, formatInfo);
 
         // Fix stretched video for a couple milliseconds (before the onVideoSizeChanged gets called)
         applyAspectRatio(formatInfo);

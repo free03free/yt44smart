@@ -911,6 +911,9 @@
     <string name="custom_update_open_browser">تنزيل بالمتصفح</string>
     <string name="mini_player_title">المشغّل المصغّر: زر الرجوع يُبقي الفيديو في نافذة بالزاوية أثناء التصفح</string>
     <string name="mini_player_play_in_mini">المشغّل المصغّر: أثناء تشغيله، يُفتح الفيديو المختار داخل النافذة المصغّرة بدلاً من ملء الشاشة</string>
+    <string name="mini_player_switch_mode">المشغّل المصغّر: التبديل بين النافذة المصغّرة وملء الشاشة</string>
+    <string name="mini_player_switch_current">الوضع الحالي: يُعاد فتح الفيديو بسرعة (باستخدام بيانات البث المحفوظة، انتظار قصير)</string>
+    <string name="mini_player_switch_full">الوضع الكامل: نفس المشغّل ينتقل بين النافذتين (دون إعادة تحميل، تجريبي)</string>
     <string name="mini_player_position">موضع المشغّل المصغّر</string>
     <string name="mini_player_pos_bottom_right">أسفل اليمين</string>
     <string name="mini_player_pos_bottom_left">أسفل اليسار</string>

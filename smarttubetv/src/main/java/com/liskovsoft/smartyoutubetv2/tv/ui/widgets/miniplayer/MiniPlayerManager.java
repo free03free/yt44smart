@@ -34,6 +34,8 @@ import com.liskovsoft.smartyoutubetv2.common.app.models.data.Video;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.AppDialogPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.PlaybackPresenter;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.selector.ExoFormatItem;
+import com.liskovsoft.smartyoutubetv2.common.misc.FormatInfoPrefetcher;
+import com.liskovsoft.smartyoutubetv2.common.misc.PlayerHandoff;
 import com.liskovsoft.smartyoutubetv2.common.prefs.MiniPlayerData;
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
 import com.liskovsoft.smartyoutubetv2.tv.ui.playback.PlaybackActivity;
@@ -122,16 +124,26 @@ public final class MiniPlayerManager {
 
         sVideo = Video.from(video);
         sPositionMs = Math.max(positionMs, 0);
+
+        // The mini window starts from the stream urls already loaded by the fullscreen player
+        FormatInfoPrefetcher.keepForHandoff(sVideo.videoId);
     }
 
     public static boolean isActive() {
         return sVideo != null;
     }
 
+    /**
+     * @return true when the window is shown at the top of the screen (the rows are laid out below it)
+     */
+    public static boolean isTopWindowVisible() {
+        return sContainer != null && sPlayerView != null && !isBottomPosition(sPosition);
+    }
+
     public static void onActivityResumed(Activity activity) {
         if (activity instanceof PlaybackActivity) {
-            // Fullscreen player takes over
-            dismiss();
+            // Fullscreen player takes over (a waiting engine is taken by the fullscreen player itself)
+            dismiss(true);
             return;
         }
 
@@ -144,7 +156,7 @@ public final class MiniPlayerManager {
         }
 
         // Moving to another browse screen: remember position and recreate the window there
-        savePositionAndDestroyView();
+        savePositionAndDestroyView(false);
 
         sPendingHost = activity;
         sStartDeadline = SystemClock.uptimeMillis() + START_MAX_WAIT_MS;
@@ -161,7 +173,7 @@ public final class MiniPlayerManager {
         if (sHost == activity) {
             if (activity.isChangingConfigurations() || AppDialogPresenter.instance(activity).isDialogShown()) {
                 // Temporary stop (rotation, opaque dialog on top): the window comes back on resume
-                savePositionAndDestroyView();
+                savePositionAndDestroyView(true);
             } else {
                 // The user has left the app (Home, screen off, etc.): close the window for good
                 dismiss();
@@ -480,9 +492,19 @@ public final class MiniPlayerManager {
      * Closes the window and forgets the video (e.g. new fullscreen playback or app exit).
      */
     public static void dismiss() {
+        dismiss(false);
+    }
+
+    /**
+     * @param keepEngine don't release the engine that waits for the next window (fullscreen player takes it)
+     */
+    private static void dismiss(boolean keepEngine) {
         Utils.removeCallbacks(sStartRunnable);
         sPendingHost = null;
-        destroyView();
+        destroyView(false, false);
+        if (!keepEngine) {
+            PlayerHandoff.discard();
+        }
         sVideo = null;
         sPositionMs = 0;
         sLongPressHandled = false;
@@ -518,9 +540,11 @@ public final class MiniPlayerManager {
             return;
         }
 
+        boolean seamless = MiniPlayerData.instance(activity).isSeamlessEnabled();
+
         sRecreating = true;
         try {
-            destroyView();
+            destroyView(seamless, false); // full mode: the running engine goes to the new window
         } finally {
             sRecreating = false;
         }
@@ -610,7 +634,22 @@ public final class MiniPlayerManager {
         video.pendingPosMs = sPositionMs;
 
         try {
-            playerView.openVideo(video);
+            boolean adopted = false;
+
+            if (seamless) {
+                // Full mode: show the engine that is already playing this video (no reload)
+                PlayerHandoff.Engine engine = PlayerHandoff.take(sVideo.videoId);
+                if (engine != null) {
+                    adopted = playerView.adoptEngine(engine, engine.video != null ? engine.video : video);
+                    if (!adopted) {
+                        PlayerHandoff.release(engine);
+                    }
+                }
+            }
+
+            if (!adopted) {
+                playerView.openVideo(video);
+            }
         } catch (Exception e) {
             Log.e(TAG, "Mini player failed to start: %s", e.getMessage());
             dismiss();
@@ -791,7 +830,10 @@ public final class MiniPlayerManager {
         }
     }
 
-    private static void savePositionAndDestroyView() {
+    /**
+     * @param pause full mode: pause the engine while the window is away
+     */
+    private static void savePositionAndDestroyView(boolean pause) {
         if (sPlayerView != null) {
             try {
                 if (sPlayerView.isEngineInitialized()) {
@@ -805,10 +847,15 @@ public final class MiniPlayerManager {
             }
         }
 
-        destroyView();
+        boolean seamless = sHost != null && MiniPlayerData.instance(sHost).isSeamlessEnabled();
+        destroyView(seamless, pause);
     }
 
-    private static void destroyView() {
+    /**
+     * @param keepEngine full mode: don't release the running engine, keep it for the next window
+     * @param pause pause the kept engine while it has no window
+     */
+    private static void destroyView(boolean keepEngine, boolean pause) {
         Utils.removeCallbacks(sJumpRunnable);
         sPendingFocus = null;
 
@@ -834,7 +881,17 @@ public final class MiniPlayerManager {
         }
 
         if (sPlayerView != null) {
-            sPlayerView.finish();
+            if (keepEngine) {
+                try {
+                    PlayerHandoff.Engine kept = sPlayerView.detachEngine(pause);
+                    if (kept != null) {
+                        PlayerHandoff.put(kept);
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "Can't keep the mini player engine: %s", e.getMessage());
+                }
+            }
+            sPlayerView.finish(); // releases the engine unless it has been taken out
         }
 
         sContainer = null;
@@ -867,7 +924,28 @@ public final class MiniPlayerManager {
         Video video = Video.from(sVideo);
         video.pendingPosMs = position;
 
-        dismiss();
+        // Fullscreen starts from the stream urls already loaded by the mini window
+        FormatInfoPrefetcher.keepForHandoff(video.videoId);
+
+        // Full mode: the running engine moves to the fullscreen player (no reload)
+        if (host != null && MiniPlayerData.instance(host).isSeamlessEnabled()) {
+            try {
+                PlayerHandoff.Engine engine = sPlayerView.detachEngine(false);
+                if (engine != null) {
+                    if (engine.video != null) {
+                        PlayerHandoff.put(engine);
+                        video = engine.video;
+                        video.pendingPosMs = 0; // the engine is already at the right position
+                    } else {
+                        PlayerHandoff.release(engine);
+                    }
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Can't hand the engine to the fullscreen player: %s", e.getMessage());
+            }
+        }
+
+        dismiss(true);
 
         if (host != null) {
             PlaybackPresenter.instance(host).openVideo(video);

@@ -16,6 +16,8 @@ import androidx.leanback.app.BrowseSupportFragment;
 import androidx.leanback.app.HeadersSupportFragment;
 import androidx.leanback.widget.ArrayObjectAdapter;
 import androidx.leanback.widget.HeaderItem;
+import androidx.leanback.widget.HorizontalGridView;
+import androidx.leanback.widget.VerticalGridView;
 import androidx.leanback.widget.ListRowPresenter;
 import androidx.leanback.widget.PageRow;
 import androidx.leanback.widget.Presenter;
@@ -501,6 +503,100 @@ public class BrowseFragment extends BrowseSupportFragment implements BrowseView 
 
         int compactTop = (int) (getResources().getDisplayMetrics().density * 32);
         setContainerListAlignTop(hide ? Math.min(compactTop, mDefaultAlignTop) : mDefaultAlignTop);
+
+        if (miniWindowVisible && hide) {
+            scheduleRowsAlign();
+        }
+    }
+
+    private int mAlignTries;
+    private final Runnable mAlignRows = this::alignRowsUnderMini;
+
+    /**
+     * The rows must start right below the mini window whatever its size is.
+     * The alignment of the rows may be stale after the window size has changed (big empty gap under the window),
+     * so the real position is measured and corrected.
+     */
+    private void scheduleRowsAlign() {
+        View root = getView();
+
+        if (root == null) {
+            return;
+        }
+
+        mAlignTries = 0;
+        root.removeCallbacks(mAlignRows);
+        root.postDelayed(mAlignRows, 200);
+        root.postDelayed(mAlignRows, 700);
+    }
+
+    private void alignRowsUnderMini() {
+        View root = getView();
+
+        if (getContext() == null || root == null || !MiniPlayerManager.isTopWindowVisible()
+                || !MiniPlayerData.instance(getContext()).isTopBarHidden(true)) {
+            return;
+        }
+
+        View dock = root.findViewById(androidx.leanback.R.id.browse_container_dock);
+        VerticalGridView grid = dock instanceof ViewGroup ? findFirstOfType((ViewGroup) dock, VerticalGridView.class) : null;
+
+        // Measure only when the first row is the selected one (the other rows are scrolled by design)
+        if (grid == null || grid.getChildCount() == 0 || grid.getSelectedPosition() != 0) {
+            return;
+        }
+
+        View row = grid.getChildAt(0);
+        View cards = row instanceof ViewGroup ? findFirstOfType((ViewGroup) row, HorizontalGridView.class) : null;
+        View target = cards != null ? cards : row;
+
+        int[] targetLoc = new int[2];
+        int[] dockLoc = new int[2];
+        target.getLocationOnScreen(targetLoc);
+        dock.getLocationOnScreen(dockLoc);
+
+        // The first cards start exactly at the top of the area reserved for the rows (right under the window)
+        int delta = dockLoc[1] - targetLoc[1];
+        float density = getResources().getDisplayMetrics().density;
+
+        if (Math.abs(delta) <= density * 3) {
+            return;
+        }
+
+        int current = getContainerListAlignTop();
+        int wanted = Math.max(0, Math.min(mDefaultAlignTop, current + delta));
+
+        if (wanted == current) {
+            return;
+        }
+
+        setContainerListAlignTop(wanted);
+
+        // The position changes after the layout. Check it again (a few times at most)
+        if (++mAlignTries < 4) {
+            root.postDelayed(mAlignRows, 350);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T extends View> T findFirstOfType(ViewGroup parent, Class<T> type) {
+        for (int i = 0; i < parent.getChildCount(); i++) {
+            View child = parent.getChildAt(i);
+
+            if (type.isInstance(child)) {
+                return (T) child;
+            }
+
+            if (child instanceof ViewGroup) {
+                T found = findFirstOfType((ViewGroup) child, type);
+
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+
+        return null;
     }
 
     /**

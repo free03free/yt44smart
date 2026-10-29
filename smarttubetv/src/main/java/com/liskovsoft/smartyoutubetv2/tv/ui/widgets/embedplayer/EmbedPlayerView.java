@@ -25,6 +25,7 @@ import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.ExoPlayerInitialize
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.selector.FormatItem;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.versions.renderer.CustomOverridesRenderersFactory;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.versions.selector.RestoreTrackSelector;
+import com.liskovsoft.smartyoutubetv2.common.misc.PlayerHandoff;
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
 
 import java.io.InputStream;
@@ -550,6 +551,97 @@ public class EmbedPlayerView extends PlayerView implements PlaybackView {
             mPlaybackPresenter.onNewVideo(video);
             mPercentWatched = video.percentWatched;
         }
+    }
+
+    /**
+     * Mini player full mode: shows an engine that is already playing this video (no new player, no reload).
+     *
+     * @return false when the engine can't be shown here (the caller releases it)
+     */
+    public boolean adoptEngine(PlayerHandoff.Engine engine, Video video) {
+        if (engine == null || video == null || isEngineInitialized()) {
+            return false;
+        }
+
+        if (mPlaybackPresenter == null) {
+            mPlaybackPresenter = getPlaybackPresenter();
+        }
+
+        // Fullscreen playback is running. Skipping (same check as in openVideo)
+        PlaybackView view = mPlaybackPresenter.getView();
+        if (!(view == null || view instanceof EmbedPlayerView || (!mPlaybackPresenter.isEngineInitialized() && getViewManager().getTopView() != PlaybackView.class))) {
+            return false;
+        }
+
+        mVideo = video;
+        mPlayerInitializer = engine.initializer;
+        mExoPlayerController = engine.controller;
+        mPlayer = engine.player;
+
+        mPlaybackPresenter.adoptVideo(video);
+        mPlaybackPresenter.setView(this);
+        mExoPlayerController.setOnVideoLoaded(this::onVideoLoaded);
+        mExoPlayerController.setVideo(video);
+        mExoPlayerController.reattachAfterHandoff();
+        mPlaybackPresenter.onViewInitialized(); // init all controllers
+
+        setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_ZOOM); // Fix unfilled borders
+        setPlayer(mPlayer);
+
+        // The small window needs the low quality
+        mExoPlayerController.selectFormat(mCustomVideoFormat != null ? mCustomVideoFormat :
+                (mQuality == QUALITY_LOW ? FormatItem.VIDEO_SUB_SD_AVC_30 : FormatItem.VIDEO_SD_AVC_30));
+        mExoPlayerController.selectFormat(FormatItem.SUBTITLE_NONE);
+        if (mIsMute) {
+            mExoPlayerController.setVolume(0);
+        }
+
+        mPercentWatched = video.percentWatched;
+
+        PlayerHandoff.markAdopted();
+        mPlaybackPresenter.onEngineInitialized(); // the video isn't loaded again
+        mPlaybackPresenter.onVideoLoaded(video);
+
+        // The video is already playing. Show the window almost at once
+        Utils.postDelayed(mShowView, 150);
+
+        return true;
+    }
+
+    /**
+     * Mini player full mode: takes the running engine out of this window (the engine is not released).
+     * The caller must pass it to {@link PlayerHandoff#put(PlayerHandoff.Engine)} or release it.
+     *
+     * @param pause pause the engine while it has no window
+     */
+    public PlayerHandoff.Engine detachEngine(boolean pause) {
+        if (!isEngineInitialized() || mVideo == null) {
+            return null;
+        }
+
+        Utils.removeCallbacks(mShowView);
+        Utils.removeCallbacks(mStopPlayback);
+        // Don't replace main player!
+        if (mPlaybackPresenter.getView() == null || mPlaybackPresenter.getView() == this) {
+            mPlaybackPresenter.onEngineReleased(); // saves the position
+        }
+
+        PlayerHandoff.Engine engine = PlayerHandoff.detach(mPlayer, mExoPlayerController, mPlayerInitializer, mVideo, pause);
+
+        if (engine == null) {
+            return null;
+        }
+
+        mExoPlayerController.setOnVideoLoaded(null);
+        mPlayer = null;
+        mExoPlayerController = null;
+        mPlayerInitializer = null;
+        setPlayer(null);
+        mOnShown = null;
+        hideView();
+        syncPositionIfNeeded();
+
+        return engine;
     }
 
     private void initPlayer() {

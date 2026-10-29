@@ -208,6 +208,34 @@ public class ExoPlayerController implements Player.EventListener {
         player.addListener(this);
     }
 
+    /**
+     * Handoff between the windows: the engine goes on, but stops reporting events and forgets the old UI.
+     */
+    public void detachForHandoff() {
+        if (mPlayer != null) {
+            mPlayer.removeListener(this);
+        }
+
+        mPlayerView = null;
+    }
+
+    /**
+     * Handoff between the windows: the engine has a new window. Start reporting events again.
+     */
+    public void reattachAfterHandoff() {
+        if (mPlayer != null) {
+            mPlayer.removeListener(this); // never register twice
+            mPlayer.addListener(this);
+        }
+    }
+
+    /**
+     * Handoff between the windows: show the quality label of the running tracks in the new UI.
+     */
+    public void refreshQualityInfo() {
+        setQualityInfo(mTrackFormatter.getQualityLabel());
+    }
+
     //@Override
     //public void setEventListener(PlayerEventListener eventListener) {
     //    mEventListener = eventListener;

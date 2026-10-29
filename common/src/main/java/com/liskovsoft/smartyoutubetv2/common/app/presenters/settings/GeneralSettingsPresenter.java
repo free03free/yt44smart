@@ -338,6 +338,13 @@ public class GeneralSettingsPresenter extends BasePresenter<Void> {
                 option -> data.setPlayInMiniEnabled(option.isSelected()),
                 data.isPlayInMiniEnabled()));
 
+        List<OptionItem> switchModes = new ArrayList<>();
+        switchModes.add(UiOptionItem.from(getContext().getString(R.string.mini_player_switch_current),
+                option -> data.setSeamlessEnabled(false), !data.isSeamlessEnabled()));
+        switchModes.add(UiOptionItem.from(getContext().getString(R.string.mini_player_switch_full),
+                option -> data.setSeamlessEnabled(true), data.isSeamlessEnabled()));
+        settingsPresenter.appendRadioCategory(getContext().getString(R.string.mini_player_switch_mode), switchModes);
+
         List<OptionItem> positions = new ArrayList<>();
         int[] positionIds = {MiniPlayerData.POSITION_BOTTOM_RIGHT, MiniPlayerData.POSITION_BOTTOM_LEFT,
                 MiniPlayerData.POSITION_TOP_RIGHT, MiniPlayerData.POSITION_TOP_LEFT};

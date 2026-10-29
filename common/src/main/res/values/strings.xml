@@ -919,6 +919,9 @@
     <string name="custom_update_open_browser">Download with browser</string>
     <string name="mini_player_title">Mini player: Back button keeps the video in a corner window while browsing</string>
     <string name="mini_player_play_in_mini">Mini player: while it is playing, open chosen videos inside the mini window instead of fullscreen</string>
+    <string name="mini_player_switch_mode">Mini player: switching between the mini window and fullscreen</string>
+    <string name="mini_player_switch_current">Current mode: the video is reopened quickly (saved stream data, short wait)</string>
+    <string name="mini_player_switch_full">Full mode: the same player moves between the windows (no reload, experimental)</string>
     <string name="mini_player_position">Mini player position</string>
     <string name="mini_player_pos_bottom_right">Bottom right</string>
     <string name="mini_player_pos_bottom_left">Bottom left</string>

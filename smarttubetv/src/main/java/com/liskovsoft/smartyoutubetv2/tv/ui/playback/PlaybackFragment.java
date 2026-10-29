@@ -15,6 +15,7 @@ import android.view.ViewGroup;
 import android.view.ViewStub;
 import android.widget.FrameLayout;
 import com.liskovsoft.smartyoutubetv2.common.prefs.WebPlayerSettings;
+import com.liskovsoft.smartyoutubetv2.common.misc.PlayerHandoff;
 import com.liskovsoft.smartyoutubetv2.tv.ui.playback.web.WebPlayerAdapter;
 import com.liskovsoft.smartyoutubetv2.tv.ui.playback.web.WebPlayerController;
 
@@ -401,7 +402,28 @@ public class PlaybackFragment extends SeekModePlaybackFragment implements Playba
 
         mPlaybackPresenter.setView(this); // replaced by the embed player?
         mPlaybackPresenter.onEngineInitialized();
+
+        if (mEngineAdopted) {
+            mEngineAdopted = false;
+            // The UI is ready a bit later
+            Utils.postDelayed(mFinishAdoption, 150);
+        }
     }
+
+    /**
+     * Mini player full mode: the engine of the mini window is already playing this video.
+     * Give the controllers the events they normally get after the loading: formats, UI state, suggestions etc.
+     */
+    private final Runnable mFinishAdoption = () -> {
+        if (mPlayer == null || mExoPlayerController == null || getVideo() == null) {
+            return;
+        }
+
+        Video video = getVideo();
+        mExoPlayerController.refreshQualityInfo();
+        mPlaybackPresenter.onSourceChanged(video); // the mini window plays in low quality: restore the user's formats
+        mPlaybackPresenter.onVideoLoaded(video);
+    };
 
     private void destroyPlayerObjects() {
         setAdapter(null); // PlayerGlue->LeanbackPlayerAdapter->Context memory leak fix
@@ -445,13 +467,28 @@ public class PlaybackFragment extends SeekModePlaybackFragment implements Playba
             mDebugInfoManager.show(false);
             mDebugInfoManager = null;
         }
-        mPlayerInitializer.release();
+        // Mini player full mode: Back was pressed. Don't release the running engine: the mini window will take it
+        boolean keepEngine = PlayerHandoff.consumeKeepRequest() && mWebController == null && mPlayer != null
+                && mExoPlayerController.containsMedia() && getVideo() != null;
+        if (keepEngine) {
+            PlayerHandoff.Engine engine = PlayerHandoff.detach(mPlayer, mExoPlayerController, mPlayerInitializer, getVideo(), false);
+            if (engine != null) {
+                PlayerHandoff.put(engine);
+            } else {
+                keepEngine = false;
+            }
+        }
+        if (!keepEngine) {
+            mPlayerInitializer.release();
+        }
         // Fix access calls when player isn't initialized
         if (mWebController != null) {
             mWebController.release();
             mWebController = null;
         }
-        mExoPlayerController.release();
+        if (!keepEngine) {
+            mExoPlayerController.release();
+        }
         mPlayer = null;
         mSubtitleManager = null;
         if (mYouTubeOverlay != null) {
@@ -487,7 +524,40 @@ public class PlaybackFragment extends SeekModePlaybackFragment implements Playba
         initializeDoubleTapHandler();
     }
 
+    private boolean mEngineAdopted;
+
+    /**
+     * Mini player full mode: takes the engine that is already playing this video instead of creating a new one.
+     */
+    private boolean adoptEngine() {
+        Video pending = mPlaybackPresenter.getVideo();
+        PlayerHandoff.Engine engine = PlayerHandoff.take(pending != null ? pending.videoId : null);
+
+        if (engine == null) {
+            return false;
+        }
+
+        if (WebPlayerSettings.isEnabled(getContext())) { // the web player is used instead of the engine
+            PlayerHandoff.release(engine);
+            return false;
+        }
+
+        mExoPlayerController.release(); // the unused controller created in onCreate
+        mExoPlayerController = engine.controller;
+        mPlayerInitializer = engine.initializer;
+        mPlayer = engine.player;
+        mExoPlayerController.reattachAfterHandoff();
+        mEngineAdopted = true;
+        PlayerHandoff.markAdopted();
+
+        return true;
+    }
+
     private void createPlayer() {
+        if (adoptEngine()) {
+            return;
+        }
+
         // Use default or pass your bandwidthMeter here: bandwidthMeter = new DefaultBandwidthMeter.Builder(getContext()).build()
         DefaultTrackSelector trackSelector = new RestoreTrackSelector(new AdaptiveTrackSelection.Factory());
         mExoPlayerController.setTrackSelector(trackSelector);

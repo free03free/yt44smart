@@ -32,6 +32,7 @@ public class MiniPlayerData {
     private static final String KEY_QUALITY = "quality";
     private static final String KEY_PLAY_IN_MINI = "play_in_mini";
     private static final String KEY_TOP_BAR_MODE = "top_bar_mode";
+    private static final String KEY_SEAMLESS = "seamless_switch";
 
     private static MiniPlayerData sInstance;
     private final SharedPreferences mPrefs;
@@ -65,6 +66,18 @@ public class MiniPlayerData {
 
     public void setPlayInMiniEnabled(boolean enabled) {
         mPrefs.edit().putBoolean(KEY_PLAY_IN_MINI, enabled).apply();
+    }
+
+    /**
+     * Full mode: the same running player moves between the mini window and fullscreen (no reload).
+     * Off: the "current mode" - the video is reopened quickly from saved stream data.
+     */
+    public boolean isSeamlessEnabled() {
+        return mPrefs.getBoolean(KEY_SEAMLESS, false);
+    }
+
+    public void setSeamlessEnabled(boolean enabled) {
+        mPrefs.edit().putBoolean(KEY_SEAMLESS, enabled).apply();
     }
 
     public int getTopBarMode() {

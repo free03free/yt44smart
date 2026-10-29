@@ -51,6 +51,43 @@ public class FormatInfoPrefetcher {
         Utils.postDelayed(sStart, FOCUS_DELAY_MS);
     }
 
+    // Last format info that a player has actually loaded (used for the mini player <-> fullscreen handoff)
+    private static String sLastId;
+    private static MediaItemFormatInfo sLastInfo;
+    private static long sLastTime;
+
+    /** Called by the player each time it has loaded the format info of a video. Doesn't affect normal playback. */
+    public static void noteLoaded(String videoId, MediaItemFormatInfo info) {
+        if (videoId == null || info == null) {
+            return;
+        }
+
+        synchronized (FormatInfoPrefetcher.class) {
+            sLastId = videoId;
+            sLastInfo = info;
+            sLastTime = System.currentTimeMillis();
+        }
+    }
+
+    /**
+     * Call right before the video moves between the fullscreen player and the mini window.
+     * The next open of the same video takes the stream urls from memory: no new network request, almost instant start.
+     * The data is used only once (see {@link #take}), so a failed playback never reuses it.
+     */
+    public static void keepForHandoff(String videoId) {
+        MediaItemFormatInfo info = null;
+
+        synchronized (FormatInfoPrefetcher.class) {
+            if (videoId != null && videoId.equals(sLastId) && System.currentTimeMillis() - sLastTime < MAX_AGE_MS) {
+                info = sLastInfo;
+            }
+        }
+
+        if (info != null) {
+            put(videoId, info);
+        }
+    }
+
     /** Returns prefetched data (and removes it from the cache) or null. */
     public static MediaItemFormatInfo take(String videoId) {
         if (videoId == null) {

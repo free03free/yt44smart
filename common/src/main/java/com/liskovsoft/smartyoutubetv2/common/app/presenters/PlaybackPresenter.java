@@ -254,6 +254,15 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
         mIsEmbedPlayerStarted = true;
     }
 
+    /**
+     * The window has taken over a running engine (mini player full mode): the video is already playing.
+     * Unlike {@link #onNewVideo} this doesn't make the controllers load the video again.
+     */
+    public void adoptVideo(Video video) {
+        mVideo = new WeakReference<>(video);
+        mIsEmbedPlayerStarted = true;
+    }
+
     @Override
     public void onFinish() {
         process(PlayerEventListener::onFinish);

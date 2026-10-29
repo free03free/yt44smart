@@ -232,6 +232,11 @@ public class PlaybackActivity extends LeanbackActivity {
             }
 
             MiniPlayerManager.capture(video, video.isLive ? 0 : positionMs);
+
+            // Full mode: the running engine goes to the mini window instead of being released
+            if (MiniPlayerData.instance(this).isSeamlessEnabled()) {
+                com.liskovsoft.smartyoutubetv2.common.misc.PlayerHandoff.requestKeep();
+            }
         } catch (Exception e) {
             Log.e(TAG, "Can't hand over the video to the mini player: %s", e.getMessage());
         }
