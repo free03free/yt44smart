@@ -61,8 +61,6 @@ public class MainUISettingsPresenter extends BasePresenter<Void> {
         appendChannelSortingCategory(settingsPresenter);
         //appendPlaylistsCategoryStyle(settingsPresenter);
         appendScaleUI(settingsPresenter);
-        appendFontScale(settingsPresenter);
-        appendFontCategories(settingsPresenter);
         appendRowTitleStyle(settingsPresenter);
         if (Build.VERSION.SDK_INT > 19) {
             appendVideoGridScale(settingsPresenter);
@@ -224,35 +222,6 @@ public class MainUISettingsPresenter extends BasePresenter<Void> {
         }
 
         settingsPresenter.appendRadioCategory(getContext().getString(R.string.playlists_style), options);
-    }
-
-    private void appendFontScale(AppDialogPresenter settingsPresenter) {
-        List<OptionItem> options = new ArrayList<>();
-
-        for (float scale : new float[] {0.7f, 0.8f, 0.9f, 1.0f, 1.1f, 1.2f, 1.3f, 1.4f, 1.5f, 1.7f, 2.0f}) {
-            options.add(UiOptionItem.from(String.format("%sx", scale),
-                    optionItem -> {
-                        mMainUIData.setFontScale(scale);
-                        mRestartApp = true;
-                    },
-                    Helpers.floatEquals(scale, mMainUIData.getFontScale())));
-        }
-
-        settingsPresenter.appendRadioCategory(getContext().getString(R.string.font_scale), options);
-    }
-
-    private void appendFontCategories(AppDialogPresenter settingsPresenter) {
-        for (FontScaler.Category category : FontScaler.Category.values()) {
-            List<OptionItem> options = new ArrayList<>();
-
-            for (float scale : new float[] {0.6f, 0.7f, 0.8f, 0.9f, 1.0f, 1.1f, 1.2f, 1.3f, 1.4f, 1.5f, 1.7f, 2.0f, 2.5f}) {
-                options.add(UiOptionItem.from(String.format("%sx", scale),
-                        optionItem -> mMainUIData.setFontScale(category, scale),
-                        Helpers.floatEquals(scale, mMainUIData.getFontScale(category))));
-            }
-
-            settingsPresenter.appendRadioCategory(getContext().getString(category.titleResId), options);
-        }
     }
 
     private void appendScaleUI(AppDialogPresenter settingsPresenter) {

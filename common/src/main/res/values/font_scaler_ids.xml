@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <item name="font_scaler_state" type="id" />
+    <item name="font_scaler_color" type="id" />
+    <item name="font_scaler_style" type="id" />
+    <item name="appearance_bg_state" type="id" />
 </resources>

@@ -1,10 +1,16 @@
 package com.liskovsoft.smartyoutubetv2.common.misc;
 
+import android.app.Activity;
 import android.content.Context;
+import android.content.res.ColorStateList;
+import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
 import android.util.SparseArray;
 import android.util.TypedValue;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
 import android.widget.TextView;
 
 import com.liskovsoft.smartyoutubetv2.common.R;
@@ -46,6 +52,7 @@ public final class FontScaler {
 
     public static void apply(Context context, View root) {
         float[] scales = MainUIData.instance(context).getFontScales();
+        applyBackground(context, root);
         walk(root, scales, false);
     }
 
@@ -91,6 +98,96 @@ public final class FontScaler {
 
         if (Math.abs(cur - target) > 0.5f) {
             tv.setTextSize(TypedValue.COMPLEX_UNIT_PX, target);
+        }
+
+        applyColorAndStyle(tv, c);
+    }
+
+    private static void applyColorAndStyle(TextView tv, Category c) {
+        Context ctx = tv.getContext();
+
+        // Color (0 = original). Focus/selected/pressed states use the accent color (or the original focus colors).
+        int color = AppearancePrefs.getTextColor(ctx, c);
+        int accent = AppearancePrefs.getAccent(ctx);
+        int key = color * 31 + accent;
+        Object[] savedColor = (Object[]) tv.getTag(R.id.font_scaler_color); // {original ColorStateList, applied key}
+        if (color != 0 || accent != 0) {
+            if (savedColor == null) {
+                savedColor = new Object[] {tv.getTextColors(), 0};
+                tv.setTag(R.id.font_scaler_color, savedColor);
+            }
+            if ((Integer) savedColor[1] != key || (color != 0 && tv.getCurrentTextColor() != color && !tv.isFocused() && !tv.isSelected())) {
+                tv.setTextColor(buildColors((ColorStateList) savedColor[0], color, accent));
+                savedColor[1] = key;
+            }
+        } else if (savedColor != null) {
+            tv.setTextColor((ColorStateList) savedColor[0]);
+            tv.setTag(R.id.font_scaler_color, null);
+        }
+
+        // Bold
+        boolean bold = AppearancePrefs.isBold(ctx, c);
+        Typeface[] savedFace = (Typeface[]) tv.getTag(R.id.font_scaler_style);
+        if (bold) {
+            Typeface cur = tv.getTypeface();
+            if (savedFace == null) {
+                savedFace = new Typeface[] {cur};
+                tv.setTag(R.id.font_scaler_style, savedFace);
+            }
+            if (cur == null || !cur.isBold()) {
+                tv.setTypeface(savedFace[0], Typeface.BOLD);
+            }
+        } else if (savedFace != null) {
+            tv.setTypeface(savedFace[0]);
+            tv.setTag(R.id.font_scaler_style, null);
+        }
+    }
+
+
+    private static ColorStateList buildColors(ColorStateList orig, int color, int accent) {
+        int[][] states = {
+                {android.R.attr.state_pressed}, {android.R.attr.state_focused},
+                {android.R.attr.state_selected}, {android.R.attr.state_activated}, {}};
+        int base = color != 0 ? color : orig.getDefaultColor();
+        int[] colors = new int[states.length];
+        for (int i = 0; i < 4; i++) {
+            if (accent != 0) {
+                colors[i] = accent;
+            } else {
+                colors[i] = orig.isStateful() ? orig.getColorForState(states[i], base) : base;
+            }
+        }
+        colors[4] = base;
+        return new ColorStateList(states, colors);
+    }
+
+    /** For preview windows: applies sizes, colors and bold to a view tree (without touching the window background). */
+    public static void applyToTree(Context context, View root) {
+        walk(root, MainUIData.instance(context).getFontScales(), false);
+    }
+
+    /** Best effort: the window background. Screens that paint their own opaque background stay as they are. */
+    private static void applyBackground(Context context, View decor) {
+        if (!(context instanceof Activity)) {
+            return;
+        }
+
+        int bg = AppearancePrefs.getBackground(context);
+        Object[] state = (Object[]) decor.getTag(R.id.appearance_bg_state); // {original drawable, applied color}
+        Window window = ((Activity) context).getWindow();
+
+        if (bg != 0) {
+            if (state == null) {
+                state = new Object[] {window.getDecorView().getBackground(), 0};
+                decor.setTag(R.id.appearance_bg_state, state);
+            }
+            if ((Integer) state[1] != bg) {
+                window.setBackgroundDrawable(new ColorDrawable(bg));
+                state[1] = bg;
+            }
+        } else if (state != null) {
+            window.setBackgroundDrawable((Drawable) state[0]);
+            decor.setTag(R.id.appearance_bg_state, null);
         }
     }
 

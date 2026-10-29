@@ -13,6 +13,7 @@ import com.liskovsoft.smartyoutubetv2.common.app.presenters.settings.SponsorBloc
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.settings.DeArrowSettingsPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.settings.GeneralSettingsPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.settings.LanguageSettingsPresenter;
+import com.liskovsoft.smartyoutubetv2.common.app.presenters.settings.AppearanceSettingsPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.settings.MainUISettingsPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.settings.PlayerSettingsPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.settings.RemoteControlSettingsPresenter;
@@ -51,6 +52,8 @@ public class AppDataSourceManager {
                 context.getString(R.string.settings_general), () -> GeneralSettingsPresenter.instance(context).show(), R.drawable.settings_app));
         settingItems.add(new SettingsItem(
                 context.getString(R.string.settings_main_ui), () -> MainUISettingsPresenter.instance(context).show(), R.drawable.settings_main_ui));
+        settingItems.add(new SettingsItem(
+                context.getString(R.string.ap_title), () -> AppearanceSettingsPresenter.instance(context).show(), R.drawable.settings_main_ui));
         settingItems.add(new SettingsItem(
                 context.getString(R.string.library_settings_title), () -> com.liskovsoft.smartyoutubetv2.common.app.presenters.settings.LibrarySettingsPresenter.instance(context).show(), R.drawable.settings_library));
         settingItems.add(new SettingsItem(
